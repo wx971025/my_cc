@@ -1,0 +1,37 @@
+# Python 字节码
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+env/
+
+# env
+.env
+
+# log
+logs/
+
+# npm
+node_modules/
+
+# uv 相关
+.python-version
+/cpython-*/
+# uv 锁文件
+# uv.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# other
+.temp/
+temp/
+test*
+.version
