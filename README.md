@@ -65,21 +65,24 @@ learn-claude-code/
 
 项目通过根目录下的 `.env` 文件读取密钥和配置，**请勿将 `.env` 文件提交到版本库**。
 
-在项目根目录创建 `.env` 文件，按如下格式填写：
+项目提供了 `.env.example` 作为模板，按以下步骤配置：
 
-```env
-# Anthropic API Key（必填）
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-
-# GitHub Personal Access Token（用于 Git 推送，可选）
-GITHUB_PAT=your_github_pat_here
-
-# 其他第三方 API Key（可选，按需填写）
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-DEEPSEEK_BASE_URL=https://api.deepseek.com
+```bash
+cp .env.example .env
 ```
 
-> ⚠️ 请确保 `.env` 已加入 `.gitignore`，避免密钥泄露。
+然后编辑 `.env`，填入真实的密钥值：
+
+| 变量名 | 是否必填 | 说明 |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | ✅ 必填 | Anthropic API 密钥，[前往获取](https://console.anthropic.com/settings/keys) |
+| `DEEPSEEK_API_KEY` | 可选 | DeepSeek API 密钥，[前往获取](https://platform.deepseek.com/api_keys) |
+| `DEEPSEEK_BASE_URL` | 可选 | DeepSeek API 地址，默认 `https://api.deepseek.com` |
+| `DMX_API_KEY` | 可选 | DMX API 密钥 |
+| `DMX_BASE_URL` | 可选 | DMX API 地址 |
+| `GITHUB_PAT` | 可选 | GitHub Personal Access Token，用于 HTTPS 推送代码，需要 `repo` 权限，[前往获取](https://github.com/settings/tokens) |
+
+> ⚠️ `.env` 已加入 `.gitignore`，请勿手动将其提交到版本库，避免密钥泄露。
 
 ---
 
