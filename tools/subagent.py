@@ -38,7 +38,7 @@ class AgentSkillTemplete:
 
 class SubAgent:
     SUBAGENT_SYSTEM = (
-        f"You are a coding subagent at {WORKDIR}. "
+        f"You are a coding subagent at {str(WORKDIR)}. "
         f"Complete the given task, then summarize your findings."
     )
 

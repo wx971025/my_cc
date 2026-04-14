@@ -6,9 +6,12 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.88.0",
+    "beautifulsoup4>=4.14.3",
+    "colorama>=0.4.6",
     "dotenv>=0.9.9",
     "langchain>=1.2.15",
     "langchain-core>=1.2.27",
+    "markdownify>=1.2.2",
     "openai>=2.30.0",
     "pip>=26.0.1",
     "python-docx>=1.2.0",

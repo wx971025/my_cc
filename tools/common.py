@@ -2,6 +2,7 @@ import subprocess
 import os
 
 from .utils import safe_path
+from .compact_messages import CompactState, track_recent_file, persist_large_output
 
 
 def run_bash(command: str) -> str:
@@ -26,12 +27,16 @@ def run_bash(command: str) -> str:
     return output[:50000] if output else "(no output)"
 
 
-def run_read(path: str, limit: int = None) -> str:
-    text = safe_path(path).read_text()
-    lines = text.splitlines()
-    if limit and limit < len(lines):
-        lines = lines[:limit]
-    return "\n".join(lines)[:50000]
+def run_read(state: CompactState, tool_use_id: str, path: str, limit: int | None = None) -> str:
+    try:
+        track_recent_file(state, path)
+        lines = safe_path(path).read_text().splitlines()
+        if limit and limit < len(lines):
+            lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
+        output = "\n".join(lines)
+        return persist_large_output(tool_use_id, output)
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def run_write(path: str, content: str) -> str:
