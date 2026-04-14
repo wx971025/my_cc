@@ -20,7 +20,7 @@ node_modules/
 
 # uv 相关
 .python-version
-/cpython-*/
+cpython-*/
 # uv 锁文件
 # uv.lock
 
@@ -30,9 +30,12 @@ node_modules/
 *.swp
 *.swo
 
+--git-common-dir
+
 # other
 .temp/
 temp/
 test*
 .version
 outputs/
+.task_outputs/
