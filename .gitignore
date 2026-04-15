@@ -41,3 +41,6 @@ outputs/
 .task_outputs/
 .transcripts/
 .claude/
+
+# hook
+.hooks/audit.log
