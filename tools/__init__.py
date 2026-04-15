@@ -21,6 +21,17 @@ SUB_AGENT_TOOLS = [
         },
     },
     {
+        "name": "bash_readonly",
+        "description": "Run a shell command, but do not allow any changes to the filesystem.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+            },
+            "required": ["command"],
+        },
+    },
+    {
         "name": "read_file",
         "description": "Read file contents.",
         "input_schema": {
@@ -132,6 +143,7 @@ SUB_AGENT_TOOL_HANDLERS = cast(
     dict[str, Callable],
     {
         "bash":       lambda **kw: run_bash(kw["command"]),
+        "bash_readonly": lambda **kw: run_bash(kw["command"]),
         "read_file":  lambda **kw: run_read(state=kw["state"], path=kw["path"], limit=kw.get("limit")),
         "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
         "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"])
@@ -154,3 +166,5 @@ TOOL_HANDLERS = SUB_AGENT_TOOL_HANDLERS | cast(
         "compact":    lambda **kw: "Compaction triggered.",
     }
 )
+
+

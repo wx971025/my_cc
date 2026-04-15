@@ -33,6 +33,7 @@ from tools.compact_messages import (
     persist_large_output,
     CompactState
 )
+from tools.utils import PermissionManager
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -47,6 +48,7 @@ except ImportError:
     pass
 
 SKILL_REGISTRY = SkillRegistry(SKILL_DIR)
+perms = PermissionManager()     # 工具执行权限管理
 
 SYSTEM = f"""You are a coding agent at {str(WORKDIR)}.
 Use the todo tool for multi-step work.
@@ -62,6 +64,7 @@ Skills available:
 """
 if HARNESS_DIR:
     SYSTEM += f"\n\nHere is the harness prompt for this project:{HARNESS_DIR.read_text()}"
+
 
 
 def agent_loop(messages: list, state: CompactState):
@@ -88,30 +91,43 @@ def agent_loop(messages: list, state: CompactState):
         results = []
         manual_compact = False
         used_todo = False
+        deny_flag = False
         for block in response.content:
             if block.type == "tool_use":
-                handler = TOOL_HANDLERS.get(block.name)
-                print(f"[main] tool_use: {block.name}, input: {block.input}")
-                try:
-                    if block.name == "read_file":
-                        output = run_read(state=state, **block.input)
-                    else:
-                        output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
+                decision = perms.check(block.name, block.input or {})
 
-                    if PERSIST_TOOL_RESULT:
-                        output = persist_large_output(block.id, output)
+                if decision["behavior"] == "deny":      # 系统拒绝授权该操作
+                    output = f"Permission denied: {decision['reason']}"
+                    deny_flag = True
+                    print(f"  [DENIED] {block.name}: {decision['reason']}")
 
-                except Exception as e:
-                    output = f"Error: {e}"
+                elif decision["behavior"] == "ask" and not perms.ask_user(block.name, block.input or {}):
+                    # 用户拒绝授权该工具
+                    output = f"Permission denied by user for {block.name}"
+                    deny_flag = True
+                    print(f"  [USER DENIED] {block.name}")
+                else:
+                    # 执行工具
+                    handler = TOOL_HANDLERS.get(block.name)
+                    print(f"[main] tool_use: {block.name}, input: {block.input}")
+                    try:
+                        if block.name == "read_file":
+                            output = run_read(state=state, **block.input)
+                        else:
+                            output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
+                        if PERSIST_TOOL_RESULT:
+                            output = persist_large_output(block.id, output)
+                    except Exception as e:
+                        output = f"Error: {e}"
 
                 print(f"[main] tool_result: {block.name}: {output[:200]}")
 
                 # Agent使用todo工具
-                if block.name == "todo":
+                if block.name == "todo" and not deny_flag:
                     used_todo = True
                 
                 # Agent主动压缩
-                if block.name == "compact":
+                if block.name == "compact" and not deny_flag:
                     manual_compact = True
                     compact_focus = (block.input or {}).get("focus")
 

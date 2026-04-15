@@ -30,3 +30,17 @@ if not HARNESS_DIR.exists():
 # 模型
 MODEL = "claude-sonnet-4-6"
 SUBAGENT_MODEL = "claude-sonnet-4-6"
+
+# -- Permission rules --
+DEFAULT_RULES = [
+    # Always deny dangerous patterns
+    {"tool": "bash", "command": "rm -rf /", "behavior": "deny"},
+    {"tool": "bash", "command": "sudo *", "behavior": "deny"},
+
+    # default ask command permission
+    {"tool": "bash", "command": "sudo *", "behavior": "ask"},
+
+    # Allow reading anything
+    {"tool": "read_file", "path": "*", "behavior": "allow"},
+]
+
