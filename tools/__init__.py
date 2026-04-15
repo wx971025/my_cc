@@ -132,7 +132,7 @@ SUB_AGENT_TOOL_HANDLERS = cast(
     dict[str, Callable],
     {
         "bash":       lambda **kw: run_bash(kw["command"]),
-        "read_file":  lambda **kw: run_read(kw["path"], kw.get("limit")),
+        "read_file":  lambda **kw: run_read(state=kw["state"], path=kw["path"], limit=kw.get("limit")),
         "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
         "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"])
     }
@@ -151,6 +151,6 @@ TOOL_HANDLERS = SUB_AGENT_TOOL_HANDLERS | cast(
         "todo":       lambda **kw: TODO.update(kw["items"]),
         "task":       lambda **kw: SUB_AGENT.run_subagent(kw["prompt"]),
         "load_skill": lambda **kw: SKILL_REGISTRY.load_full_text(kw["name"]),
-        "compact":    lambda **kw: compact_history(kw["messages"], kw["state"], kw.get("focus")),
+        "compact":    lambda **kw: "Compaction triggered.",
     }
 )

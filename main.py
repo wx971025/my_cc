@@ -24,6 +24,7 @@ from configs import (
     PERSIST_TOOL_RESULT
 )
 from tools import TOOL_HANDLERS, TOOLS, TODO
+from tools.common import run_read
 from tools.skill import SkillRegistry
 from tools.compact_messages import (
     micro_compact, 
@@ -93,7 +94,7 @@ def agent_loop(messages: list, state: CompactState):
                 print(f"[main] tool_use: {block.name}, input: {block.input}")
                 try:
                     if block.name == "read_file":
-                        output = handler(state, block.id, **block.input)
+                        output = run_read(state=state, **block.input)
                     else:
                         output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
 
@@ -130,12 +131,14 @@ def agent_loop(messages: list, state: CompactState):
             if reminder:
                 results.insert(0, {"type": "text", "text": reminder})
 
+        messages.append({"role": "user", "content": results})
+
         if manual_compact:
             print("[main] manual compact...")
             messages[:] = compact_history(messages, state, focus=compact_focus)
             print(f"[main] Compact summary: {state.last_summary}")
 
-        messages.append({"role": "user", "content": results})
+        
 
 
 if __name__ == "__main__":

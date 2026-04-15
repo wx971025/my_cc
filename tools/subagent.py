@@ -4,6 +4,8 @@ from anthropic import Anthropic
 
 from configs import WORKDIR
 
+from .common import run_read
+
 
 class AgentSkillTemplete:
     """
@@ -70,7 +72,10 @@ class SubAgent:
                 if block.type == "tool_use":
                     print(f"[subagent] tool_use: {block.name}, input: {block.input}")
                     handler = self.tools_handlers.get(block.name)
-                    output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
+                    if block.name == "read_file":
+                        output = run_read(**block.input)
+                    else:
+                        output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                     print(f"[subagent] output: {output}")
                     results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)[:50000]})
             sub_messages.append({"role": "user", "content": results})
