@@ -1,6 +1,6 @@
 # learn-claude-code
 
-一个基于 Anthropic Claude API 构建的**最小化 AI 编码代理（Coding Agent）**，旨在通过清晰的代码结构，帮助开发者理解和学习 Agent Loop、工具调用（Tool Use）、子代理（SubAgent）、上下文压缩（Context Compaction）等核心概念。
+一个基于 Anthropic Claude API 构建的**最小化 AI 编码代理（Coding Agent）**，旨在通过清晰的代码结构，帮助开发者理解和学习 Agent Loop、工具调用（Tool Use）、权限管控（Permission）、子代理（SubAgent）、上下文压缩（Context Compaction）等核心概念。
 
 ---
 
@@ -9,12 +9,13 @@
 本项目实现了一个可交互的命令行 AI 编码助手，核心思想是：
 
 ```
-用户输入 → 调用 Claude 模型 → 检测 tool_use → 执行工具 → 返回结果 → 循环
+用户输入 → 调用 Claude 模型 → 检测 tool_use → 权限检查 → 执行工具 → 返回结果 → 循环
 ```
 
 通过这个极简实现，你可以直观地看到：
 - Agent Loop 的完整运转机制
 - Claude 工具调用（Function Calling）的处理方式
+- **工具执行权限管控（Permission Pipeline）**
 - 子代理（SubAgent）的任务委派与上下文隔离
 - 多步骤任务的 TODO 计划管理
 - **上下文压缩（Context Compaction）的两级策略**
@@ -29,7 +30,7 @@ learn-claude-code/
 ├── main.py                      # 主入口：Agent Loop 核心实现
 ├── configs/
 │   ├── __init__.py
-│   └── configs.py               # 配置项：工作目录、模型名称、压缩阈值等
+│   └── configs.py               # 配置项：模型、压缩阈值、权限规则等
 ├── models/
 │   ├── __init__.py
 │   └── anthropic_client.py      # Anthropic 客户端初始化
@@ -40,15 +41,18 @@ learn-claude-code/
 │   ├── skill.py                 # 技能系统：SkillRegistry 注册表与按需加载
 │   ├── subagent.py              # 子代理：SubAgent 类 & AgentSkillTemplete
 │   ├── todo.py                  # TODO 管理器：多步骤任务计划
-│   └── utils.py                 # 工具函数（路径安全等）
+│   └── utils.py                 # 路径安全、BashSecurityValidator、PermissionManager
+├── utils/
+│   └── messages.py              # 消息结构归一化与文本提取
 ├── skills/
 │   ├── web_scraper/
-│   │   └── SKILL.md             # 网页爬取技能文档
+│   │   ├── SKILL.md             # 网页爬取技能文档
+│   │   └── scrape.py            # 爬取脚本实现
 │   └── cards/
 │       └── SKILL.md             # 示例技能文档
 ├── .task_outputs/
-│   ├── tool-results/            # 持久化的大体积工具输出
-│   └── transcripts/             # 压缩前的完整对话快照（.jsonl）
+│   └── tool-results/            # 持久化的大体积工具输出
+├── .transcripts/                # 压缩前的完整对话快照（.jsonl）
 ├── pyproject.toml               # 项目依赖与配置
 └── .env                         # 环境变量（不提交至版本库，见下方配置说明）
 ```
@@ -59,16 +63,68 @@ learn-claude-code/
 
 代理内置以下工具，Claude 可在对话中自动调用：
 
-| 工具名          | 功能描述                                       |
-|---------------|----------------------------------------------|
-| `bash`        | 执行 Shell 命令（内置危险命令拦截）                 |
-| `read_file`   | 读取文件内容，支持行数限制                          |
-| `write_file`  | 写入文件内容（自动创建父目录）                       |
-| `edit_file`   | 精确替换文件中的指定文本（只替换一次）                 |
-| `task`        | 派发子代理任务（全新上下文，共享文件系统）              |
-| `todo`        | 更新当前会话的多步骤任务计划                         |
-| `load_skill`  | 按需加载技能文档，将专项指令注入当前上下文              |
-| `compact`     | 主动触发上下文全量压缩，可指定需重点保留的 focus 信息   |
+| 工具名            | 功能描述                                       |
+|-----------------|----------------------------------------------|
+| `bash`          | 执行 Shell 命令（经过安全校验与权限管控）           |
+| `bash_readonly` | 执行只读 Shell 命令（不允许修改文件系统）           |
+| `read_file`     | 读取文件内容，支持行数限制                        |
+| `write_file`    | 写入文件内容（自动创建父目录）                     |
+| `edit_file`     | 精确替换文件中的指定文本（只替换一次）               |
+| `task`          | 派发子代理任务（全新上下文，共享文件系统）            |
+| `todo`          | 更新当前会话的多步骤任务计划                       |
+| `load_skill`    | 按需加载技能文档，将专项指令注入当前上下文            |
+| `compact`       | 主动触发上下文全量压缩，可指定需重点保留的 focus 信息 |
+
+---
+
+## 🔒 权限管控（Permission Pipeline）
+
+每次工具调用前，`PermissionManager` 会按以下流程进行权限决策：
+
+```
+工具调用 → Bash 安全校验 → deny 规则匹配 → 模式检查 → allow 规则匹配 → 询问用户
+```
+
+### 运行模式
+
+| 模式        | 说明                                               |
+|-----------|--------------------------------------------------|
+| `default` | 默认模式，按规则匹配决定 allow/deny/ask              |
+| `plan`    | 计划模式，拒绝所有写操作，仅允许只读工具               |
+| `auto`    | 自动模式，自动放行只读工具，写操作需规则匹配或用户确认   |
+
+### Bash 安全校验（BashSecurityValidator）
+
+对 `bash` 工具执行额外的正则校验，拦截危险模式：
+
+| 校验项 | 风险等级 | 行为 |
+|-------|--------|------|
+| `sudo` | 高风险 | 直接拒绝 |
+| `rm -rf` | 高风险 | 直接拒绝 |
+| Shell 元字符（`; & \| \` $`） | 中风险 | 询问用户 |
+| 命令替换（`$()`） | 中风险 | 询问用户 |
+| IFS 注入 | 中风险 | 询问用户 |
+
+### 用户交互
+
+当权限决策为 `ask` 时，用户可选择：
+- `y` — 本次允许
+- `n` — 本次拒绝
+- `always` — 为该工具永久添加 allow 规则
+
+连续拒绝 3 次以上时，系统会提示考虑切换到 plan 模式。
+
+### 权限规则配置
+
+默认规则在 `configs/configs.py` 的 `DEFAULT_RULES` 中定义，支持按工具名、路径 glob、命令 glob 进行匹配：
+
+```python
+DEFAULT_RULES = [
+    {"tool": "bash", "command": "rm -rf /", "behavior": "deny"},
+    {"tool": "bash", "command": "sudo *",   "behavior": "deny"},
+    {"tool": "read_file", "path": "*",      "behavior": "allow"},
+]
+```
 
 ---
 
@@ -93,7 +149,19 @@ cp .env.example .env
 | `DMX_BASE_URL` | 可选 | DMX API 地址 |
 | `GITHUB_PAT` | 可选 | GitHub Personal Access Token，用于 HTTPS 推送代码，需要 `repo` 权限，[前往获取](https://github.com/settings/tokens) |
 
-> ⚠️ `.env` 已加入 `.gitignore`，请勿手动将其提交到版本库，避免密钥泄露。
+### 核心配置参数
+
+以下参数在 `configs/configs.py` 中配置：
+
+| 参数 | 默认值 | 说明 |
+|------|-------|------|
+| `MODEL` | `claude-sonnet-4-6` | 主 Agent 使用的模型 |
+| `SUBAGENT_MODEL` | `claude-sonnet-4-6` | 子 Agent 使用的模型 |
+| `CONTEXT_LIMIT` | `50000` | 上下文字符数上限，超过则自动触发全量压缩 |
+| `KEEP_RECENT_TOOL_RESULTS` | `3` | 微压缩保留最近工具结果的条数 |
+| `PERSIST_TOOL_RESULT` | `True` | 是否开启大体积输出持久化 |
+| `PERSIST_THRESHOLD` | `30000` | 工具输出超过此字符数则落盘 |
+| `PREVIEW_CHARS` | `2000` | 落盘后保留在上下文中的预览字符数 |
 
 ---
 
@@ -145,6 +213,12 @@ s01 >> q   # 输入 q 或 exit 退出
                   │
                   ▼
 ┌─────────────────────────────────────────┐
+│       微压缩 + 上下文大小检查              │
+│    （超限则自动触发全量压缩）               │
+└─────────────────┬───────────────────────┘
+                  │
+                  ▼
+┌─────────────────────────────────────────┐
 │         调用 Claude API                  │
 │    model.messages.create(...)            │
 └─────────────────┬───────────────────────┘
@@ -154,15 +228,17 @@ s01 >> q   # 输入 q 或 exit 退出
         是                           否
         │                             │
         ▼                             ▼
-┌──────────────┐              ┌──────────────┐
-│  执行工具     │              │  输出最终回复  │
-│  并收集结果   │              │  结束循环     │
-└──────┬───────┘              └──────────────┘
+┌──────────────────┐          ┌──────────────┐
+│  权限检查          │          │  输出最终回复  │
+│  deny → 拒绝      │          │  结束循环     │
+│  ask  → 询问用户   │          └──────────────┘
+│  allow → 执行工具  │
+└──────┬───────────┘
        │
        ▼
 ┌──────────────────────────┐
 │  将结果写回 messages      │
-│  → 触发上下文压缩检查      │
+│  → 手动 compact 检查      │
 └──────┬───────────────────┘
        │
        └──────────────────► 继续下一轮
@@ -176,23 +252,24 @@ s01 >> q   # 输入 q 或 exit 退出
 
 ### Level 1 — 微压缩（Micro Compact）
 
-每轮工具调用后自动触发，**不丢失任何轮次**，仅对历史工具结果进行截断：
+每轮循环开始时自动触发，**不丢失任何轮次**，仅对历史工具结果进行截断：
 
-- 保留最近 `KEEP_RECENT_TOOL_RESULTS`（默认 6）条工具结果的完整内容
-- 更早的工具结果替换为占位文本：`[Earlier tool result compacted. Re-run the tool if you need full detail.]`
+- 保留最近 `KEEP_RECENT_TOOL_RESULTS`（默认 3）条工具结果的完整内容
+- 更早且超过 120 字符的工具结果替换为占位文本：`[Earlier tool result compacted. Re-run the tool if you need full detail.]`
 
 ### Level 2 — 全量压缩（Full Compact）
 
-当上下文预估大小超过阈值（`COMPACT_THRESHOLD`）时自动触发，或由 `compact` 工具主动调用：
+当上下文预估大小超过 `CONTEXT_LIMIT`（默认 50000）时自动触发，或由 `compact` 工具主动调用：
 
-1. 将完整对话历史以 `.jsonl` 格式保存到 `.task_outputs/transcripts/`（防止信息永久丢失）
+1. 将完整对话历史以 `.jsonl` 格式保存到 `.transcripts/`（防止信息永久丢失）
 2. 调用 Claude 对历史对话生成摘要，保留：当前目标、重要发现与决策、已读写的文件、剩余工作、用户约束
 3. 用一条包含摘要的 `user` 消息替换全部历史，大幅缩减上下文体积
 4. 支持传入 `focus` 参数，在摘要末尾追加需重点保留的信息
+5. 自动附带最近访问的 5 个文件路径，便于压缩后快速恢复工作上下文
 
 ### 大体积输出持久化
 
-工具输出超过 `PERSIST_THRESHOLD` 字节时，完整内容自动落盘至 `.task_outputs/tool-results/<tool_use_id>.txt`，消息中仅保留预览片段，避免单次输出撑爆上下文。
+工具输出超过 `PERSIST_THRESHOLD`（默认 30000）字符时，完整内容自动落盘至 `.task_outputs/tool-results/<tool_use_id>.txt`，消息中仅保留前 `PREVIEW_CHARS`（默认 2000）字符的预览片段，避免单次输出撑爆上下文。
 
 ---
 
@@ -204,6 +281,7 @@ s01 >> q   # 输入 q 或 exit 退出
 - ✅ 子代理**共享文件系统**，可读写同一工作目录
 - ✅ 子代理完成任务后，仅将**最终摘要**返回给主代理
 - ✅ 最多运行 **30 轮**工具调用（安全上限）
+- ✅ 子代理可用工具：`bash`、`bash_readonly`、`read_file`、`write_file`、`edit_file`
 
 ---
 
@@ -235,6 +313,7 @@ description: 一句话描述这个技能的用途
 | 技能名          | 描述                              |
 |---------------|----------------------------------|
 | `web_scraper` | 爬取指定网页内容并将其转换保存为 Markdown 文件 |
+| `cards`       | 示例技能文档                        |
 
 ---
 
@@ -255,8 +334,10 @@ description: 一句话描述这个技能的用途
 |-----------------|-------------|------------------------|
 | `anthropic`     | >= 0.88.0   | Claude API 客户端         |
 | `python-dotenv` | -           | 读取 .env 环境变量          |
+| `beautifulsoup4`| >= 4.14.3   | HTML 解析（技能：网页爬取）   |
+| `markdownify`   | >= 1.2.2    | HTML 转 Markdown         |
+| `colorama`      | >= 0.4.6    | 终端彩色输出               |
 | `openai`        | >= 2.30.0   | OpenAI 兼容接口（备用）      |
-| `langchain`     | >= 1.2.15   | LLM 工具链（扩展用）         |
 
 ---
 
