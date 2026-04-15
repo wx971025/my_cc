@@ -26,14 +26,15 @@ from configs import (
 from tools import TOOL_HANDLERS, TOOLS, TODO
 from tools.common import run_read
 from tools.skill import SkillRegistry
-from tools.compact_messages import (
+from tools.compact import (
     micro_compact, 
     estimate_context_size, 
     compact_history, 
     persist_large_output,
     CompactState
 )
-from tools.utils import PermissionManager
+from modules.permission import PermissionManager
+from modules.hook import HookManager
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -49,6 +50,7 @@ except ImportError:
 
 SKILL_REGISTRY = SkillRegistry(SKILL_DIR)
 perms = PermissionManager()     # 工具执行权限管理
+hooks = HookManager()           # 钩子管理
 
 SYSTEM = f"""You are a coding agent at {str(WORKDIR)}.
 Use the todo tool for multi-step work.
@@ -65,6 +67,20 @@ Skills available:
 if HARNESS_DIR:
     SYSTEM += f"\n\nHere is the harness prompt for this project:{HARNESS_DIR.read_text()}"
 
+
+def init_workspace_trust():
+    """
+    Initialize workspace trust.
+    """
+    print(f"[init_workspace_trust] Initializing workspace trust for >>> {WORKDIR}")
+    answer = input(f"Are you sure you want to initialize workspace trust? (y/n): ")
+    if answer.lower() == "y":
+        trust_marker = WORKDIR / ".claude" / ".claude_trusted"
+        trust_marker.parent.mkdir(parents=True, exist_ok=True)
+        trust_marker.touch()
+        return True
+    else:
+        return False
 
 
 def agent_loop(messages: list, state: CompactState):
@@ -92,10 +108,10 @@ def agent_loop(messages: list, state: CompactState):
         manual_compact = False
         used_todo = False
         deny_flag = False
+
         for block in response.content:
             if block.type == "tool_use":
                 decision = perms.check(block.name, block.input or {})
-
                 if decision["behavior"] == "deny":      # 系统拒绝授权该操作
                     output = f"Permission denied: {decision['reason']}"
                     deny_flag = True
@@ -108,17 +124,37 @@ def agent_loop(messages: list, state: CompactState):
                     print(f"  [USER DENIED] {block.name}")
                 else:
                     # 执行工具
-                    handler = TOOL_HANDLERS.get(block.name)
-                    print(f"[main] tool_use: {block.name}, input: {block.input}")
-                    try:
-                        if block.name == "read_file":
-                            output = run_read(state=state, **block.input)
-                        else:
-                            output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                        if PERSIST_TOOL_RESULT:
-                            output = persist_large_output(block.id, output)
-                    except Exception as e:
-                        output = f"Error: {e}"
+                    tool_input = dict(block.input or {})
+                    ctx = {"tool_name": block.name, "tool_input": tool_input}
+
+                    # PreToolUse hook
+                    pre_result = hooks.run_hooks("PreToolUse", ctx)
+
+                    hook_prefix = "\n".join(f"[Hook]: {m}" for m in pre_result.get("messages", []))
+
+                    if pre_result.get("blocked"):
+                        reason = pre_result.get("block_reason", "Blocked by hook")
+                        output = f"{hook_prefix}\nTool blocked by PreToolUse hook: {reason}".strip()
+                    else:
+                        handler = TOOL_HANDLERS.get(block.name)
+                        effective_input = ctx["tool_input"]
+                        print(f"[main] tool_use: {block.name}, input: {effective_input}")
+                        try:
+                            if block.name == "read_file":
+                                output = run_read(state=state, **effective_input)
+                            else:
+                                output = handler(**effective_input) if handler else f"Unknown tool: {block.name}"
+                            if PERSIST_TOOL_RESULT:
+                                output = persist_large_output(block.id, output)
+                        except Exception as e:
+                            output = f"Error: {e}"
+                        if hook_prefix:
+                            output = f"{hook_prefix}\n{output}"
+                    
+                    ctx["tool_output"] = output
+                    post_result = hooks.run_hooks("PostToolUse", ctx)
+                    for msg in post_result.get("messages", []):
+                        output += f"\n[Hook note]: {msg}"
 
                 print(f"[main] tool_result: {block.name}: {output[:200]}")
 
@@ -154,10 +190,13 @@ def agent_loop(messages: list, state: CompactState):
             messages[:] = compact_history(messages, state, focus=compact_focus)
             print(f"[main] Compact summary: {state.last_summary}")
 
-        
 
 
 if __name__ == "__main__":
+    if not init_workspace_trust():
+        print("[main] Workspace trust not initialized. Exiting...")
+        exit(1)
+
     history = []
     compact_state = CompactState()
 

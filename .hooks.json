@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "bash",
+        "command": "bash .hooks/pre_bash.sh"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "bash",
+        "command": "bash .hooks/post_bash.sh"
+      }
+    ]
+  }
+}

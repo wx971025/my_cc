@@ -2,7 +2,7 @@ import subprocess
 import os
 
 from .utils import safe_path
-from .compact_messages import CompactState, track_recent_file, persist_large_output
+from .compact import CompactState, track_recent_file
 
 
 def run_bash(command: str) -> str:

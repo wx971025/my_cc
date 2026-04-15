@@ -7,7 +7,6 @@ from .common import run_read, run_write, run_bash, run_edit
 from .todo import TODO
 from .subagent import SubAgent
 from .skill import SkillRegistry
-from .compact_messages import CompactState, compact_history
 
 
 SUB_AGENT_TOOLS = [
@@ -167,4 +166,5 @@ TOOL_HANDLERS = SUB_AGENT_TOOL_HANDLERS | cast(
     }
 )
 
-
+READ_ONLY_TOOLS = {"read_file", "bash_readonly"}
+WRITE_TOOLS = {"write_file", "edit_file", "bash"}

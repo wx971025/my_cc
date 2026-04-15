@@ -39,3 +39,5 @@ test*
 .version
 outputs/
 .task_outputs/
+.transcripts/
+.claude/
