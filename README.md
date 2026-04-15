@@ -34,14 +34,18 @@ learn-claude-code/
 ├── models/
 │   ├── __init__.py
 │   └── anthropic_client.py      # Anthropic 客户端初始化
+├── modules/
+│   ├── __init__.py
+│   ├── permission.py            # 权限系统：PermissionManager
+│   └── hook.py                  # Hook 系统：Pre/Post/SessionStart
 ├── tools/
 │   ├── __init__.py              # 工具注册与路由（TOOLS / TOOL_HANDLERS）
 │   ├── common.py                # 基础工具实现：bash、读写编辑文件
-│   ├── compact_messages.py      # 上下文压缩逻辑（微压缩 + 全量压缩）
+│   ├── compact.py               # 上下文压缩逻辑（微压缩 + 全量压缩）
 │   ├── skill.py                 # 技能系统：SkillRegistry 注册表与按需加载
 │   ├── subagent.py              # 子代理：SubAgent 类 & AgentSkillTemplete
 │   ├── todo.py                  # TODO 管理器：多步骤任务计划
-│   └── utils.py                 # 路径安全、BashSecurityValidator、PermissionManager
+│   └── utils.py                 # 路径安全工具
 ├── utils/
 │   └── messages.py              # 消息结构归一化与文本提取
 ├── skills/
@@ -50,6 +54,8 @@ learn-claude-code/
 │   │   └── scrape.py            # 爬取脚本实现
 │   └── cards/
 │       └── SKILL.md             # 示例技能文档
+├── .hooks.json                  # Hook 配置文件
+├── .hooks/                      # Hook 脚本目录（示例：pre_bash.sh/post_bash.sh）
 ├── .task_outputs/
 │   └── tool-results/            # 持久化的大体积工具输出
 ├── .transcripts/                # 压缩前的完整对话快照（.jsonl）
@@ -128,6 +134,56 @@ DEFAULT_RULES = [
 
 ---
 
+## 🪝 Hook 系统（HookManager）
+
+项目内置了一个轻量 Hook 机制，入口在 `modules/hook.py`，当前支持以下事件：
+
+- `SessionStart`
+- `PreToolUse`
+- `PostToolUse`
+
+配置文件为项目根目录的 `.hooks.json`，示例结构：
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "bash", "command": "bash .hooks/pre_bash.sh" }
+    ],
+    "PostToolUse": [
+      { "matcher": "bash", "command": "bash .hooks/post_bash.sh" }
+    ]
+  }
+}
+```
+
+### Hook 上下文与返回约定
+
+Hook 通过环境变量接收上下文：
+
+- `HOOK_EVENT`
+- `HOOK_TOOL_NAME`
+- `HOOK_TOOL_INPUT`（JSON 字符串）
+- `HOOK_TOOL_OUTPUT`（仅 PostToolUse 可用）
+
+退出码语义：
+
+- `0`：正常通过
+- `1`：阻止本次工具执行
+- `2`：向对话注入提示消息（不阻止）
+
+### Workspace Trust
+
+为避免在不可信仓库执行任意脚本，Hook 默认仅在工作区被信任后启用。当前教学版采用 marker file：
+
+```text
+.claude/.claude_trusted
+```
+
+创建该文件即表示你信任当前工作区中的 Hook 配置。
+
+---
+
 ## ⚙️ 配置说明
 
 项目通过根目录下的 `.env` 文件读取密钥和配置，**请勿将 `.env` 文件提交到版本库**。
@@ -188,7 +244,16 @@ pip install -r requirements.txt
 
 参考上方「配置说明」，创建并填写 `.env` 文件。
 
-### 4. 启动代理
+### 4. （可选）启用 Hook 信任
+
+如果你希望 `.hooks.json` 生效，需要先标记工作区为 trusted：
+
+```bash
+mkdir -p .claude
+touch .claude/.claude_trusted
+```
+
+### 5. 启动代理
 
 ```bash
 python main.py
@@ -333,11 +398,13 @@ description: 一句话描述这个技能的用途
 | 依赖包             | 版本要求      | 用途                     |
 |-----------------|-------------|------------------------|
 | `anthropic`     | >= 0.88.0   | Claude API 客户端         |
-| `python-dotenv` | -           | 读取 .env 环境变量          |
+| `dotenv`        | >= 0.9.9    | 读取 .env 环境变量          |
 | `beautifulsoup4`| >= 4.14.3   | HTML 解析（技能：网页爬取）   |
 | `markdownify`   | >= 1.2.2    | HTML 转 Markdown         |
 | `colorama`      | >= 0.4.6    | 终端彩色输出               |
 | `openai`        | >= 2.30.0   | OpenAI 兼容接口（备用）      |
+| `langchain`     | >= 1.2.15   | 扩展链路与实验依赖            |
+| `langchain-core`| >= 1.2.27   | LangChain 核心组件           |
 
 ---
 

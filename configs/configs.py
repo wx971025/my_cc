@@ -38,7 +38,7 @@ DEFAULT_RULES = [
     {"tool": "bash", "command": "sudo *", "behavior": "deny"},
 
     # default ask command permission
-    {"tool": "bash", "command": "sudo *", "behavior": "ask"},
+    {"tool": "bash", "command": "*", "behavior": "ask"},
 
     # Allow reading anything
     {"tool": "read_file", "path": "*", "behavior": "allow"},
