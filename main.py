@@ -35,6 +35,7 @@ from tools.compact import (
 )
 from modules.permission import PermissionManager
 from modules.hook import HookManager
+from modules.memory import memory_mgr
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -52,6 +53,7 @@ SKILL_REGISTRY = SkillRegistry(SKILL_DIR)
 perms = PermissionManager()     # 工具执行权限管理
 hooks = HookManager()           # 钩子管理
 
+
 SYSTEM = f"""You are a coding agent at {str(WORKDIR)}.
 Use the todo tool for multi-step work.
 Keep exactly one step in_progress when a task has multiple steps.
@@ -66,6 +68,32 @@ Skills available:
 """
 if HARNESS_DIR:
     SYSTEM += f"\n\nHere is the harness prompt for this project:{HARNESS_DIR.read_text()}"
+
+
+MEMORY_GUIDANCE = """
+When to save memories:
+- User states a preference ("I like tabs", "always use pytest") -> type: user
+- User corrects you ("don't do X", "that was wrong because...") -> type: feedback
+- You learn a project fact that is not easy to infer from current code alone
+  (for example: a rule exists because of compliance, or a legacy module must
+  stay untouched for business reasons) -> type: project
+- You learn where an external resource lives (ticket board, dashboard, docs URL)
+  -> type: reference
+When NOT to save:
+- Anything easily derivable from code (function signatures, file structure, directory layout)
+- Temporary task state (current branch, open PR numbers, current TODOs)
+- Secrets or credentials (API keys, passwords)
+"""
+
+
+def build_system_prompt() -> str:
+    """Assemble system prompt with memory content included."""
+    parts = [SYSTEM]
+    memory_section = memory_mgr.load_memory_prompt()
+    if memory_section:
+        parts.append(memory_section)
+    parts.append(MEMORY_GUIDANCE)
+    return "\n\n".join(parts)
 
 
 def init_workspace_trust():
@@ -196,6 +224,13 @@ if __name__ == "__main__":
     if not init_workspace_trust():
         print("[main] Workspace trust not initialized. Exiting...")
         exit(1)
+
+    memory_mgr.load_all()
+    mem_count = len(memory_mgr.memories)
+    if mem_count:
+        print(f"[{mem_count} memories loaded into context]")
+    else:
+        print("[No existing memories. The agent can create them with save_memory.]")
 
     history = []
     compact_state = CompactState()

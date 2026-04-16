@@ -1,3 +1,5 @@
+import time
+
 from .configs import (
     WORKDIR, 
     MODEL, 
@@ -11,5 +13,11 @@ from .configs import (
     TOOL_RESULTS_DIR,
     KEEP_RECENT_TOOL_RESULTS,
     TRANSCRIPT_DIR,
-    DEFAULT_RULES
+    DEFAULT_RULES,
+    MEMORY_DIR,
+    MEMORY_INDEX,
+    MEMORY_TYPES,
+    MAX_INDEX_LINES
 )
+
+now = time.time()

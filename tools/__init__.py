@@ -7,6 +7,7 @@ from .common import run_read, run_write, run_bash, run_edit
 from .todo import TODO
 from .subagent import SubAgent
 from .skill import SkillRegistry
+from modules.memory import memory_mgr
 
 
 SUB_AGENT_TOOLS = [
@@ -135,6 +136,21 @@ TOOLS = SUB_AGENT_TOOLS + [
             },
         },
     },
+    {
+        "name": "save_memory", 
+        "description": "Save a persistent memory that survives across sessions.",
+        "input_schema": 
+            {
+                "type": "object", 
+                "properties": {
+                    "name": {"type": "string", "description": "Short identifier (e.g. prefer_tabs, db_schema)"},
+                    "description": {"type": "string", "description": "One-line summary of what this memory captures"},
+                    "type": {"type": "string", "enum": ["user", "feedback", "project", "reference"], "description": "user=preferences, feedback=corrections, project=non-obvious project conventions or decision reasons, reference=external resource pointers"},
+                    "content": {"type": "string", "description": "Full memory content (multi-line OK)"},
+                }, 
+                "required": ["name", "description", "type", "content"]
+            },
+        },
 ]
 
 
@@ -145,7 +161,7 @@ SUB_AGENT_TOOL_HANDLERS = cast(
         "bash_readonly": lambda **kw: run_bash(kw["command"]),
         "read_file":  lambda **kw: run_read(state=kw["state"], path=kw["path"], limit=kw.get("limit")),
         "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
-        "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"])
+        "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
     }
 )
 
@@ -163,6 +179,7 @@ TOOL_HANDLERS = SUB_AGENT_TOOL_HANDLERS | cast(
         "task":       lambda **kw: SUB_AGENT.run_subagent(kw["prompt"]),
         "load_skill": lambda **kw: SKILL_REGISTRY.load_full_text(kw["name"]),
         "compact":    lambda **kw: "Compaction triggered.",
+        "save_memory":  lambda **kw: memory_mgr.save_memory(kw["name"], kw["description"], kw["type"], kw["content"]),
     }
 )
 

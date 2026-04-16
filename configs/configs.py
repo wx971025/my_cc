@@ -44,3 +44,8 @@ DEFAULT_RULES = [
     {"tool": "read_file", "path": "*", "behavior": "allow"},
 ]
 
+
+MEMORY_DIR = WORKDIR / ".memory"
+MEMORY_INDEX = MEMORY_DIR / "MEMORY.md"
+MEMORY_TYPES = ("user", "feedback", "project", "reference")
+MAX_INDEX_LINES = 200
