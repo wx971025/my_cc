@@ -195,9 +195,19 @@ if __name__ == "__main__":
 
     while True:
         try:
-            query = input("\001\033[36m\002s01 >> \001\033[0;0m\002")
+            query = input("\001\033[36m\002Agent >> \001\033[0;0m\002")
             if query.strip().lower() in ("q", "exit", ""): 
                 break
+
+            if query.strip().lower() == "/help":
+                print("--- Help ---")
+                print("  /prompt: Show the system prompt")
+                print("  /sections: Show the system prompt sections")
+                print("  /help: Show this help message")
+                print("  /skills: Show the available skills")
+                print("  /q: Exit the agent")
+                print("--- End ---")
+                continue
 
             if query.strip().lower() == "/prompt":
                 print("--- System Prompt ---")
@@ -210,6 +220,13 @@ if __name__ == "__main__":
                 for line in SYSTEM.splitlines():
                     if line.startswith("# ") or line == DYNAMIC_BOUNDARY:
                         print(f"  {line}")
+                continue
+
+            
+            if query.strip().lower() == "/skills":
+                print("--- Skills ---")
+                print(skill_manager.skill_describe_available())
+                print("--- End ---")
                 continue
 
         except (EOFError, KeyboardInterrupt):

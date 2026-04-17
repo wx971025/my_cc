@@ -37,12 +37,12 @@ learn-claude-code/
 ├── modules/
 │   ├── __init__.py
 │   ├── permission.py            # 权限系统：PermissionManager
-│   └── hook.py                  # Hook 系统：Pre/Post/SessionStart
+│   ├── hook.py                  # Hook 系统：Pre/Post/SessionStart
+│   └── skill.py                 # 技能文档加载：SkillManager
 ├── tools/
 │   ├── __init__.py              # 工具注册与路由（TOOLS / TOOL_HANDLERS）
 │   ├── common.py                # 基础工具实现：bash、读写编辑文件
 │   ├── compact.py               # 上下文压缩逻辑（微压缩 + 全量压缩）
-│   ├── skill.py                 # 技能系统：SkillRegistry 注册表与按需加载
 │   ├── subagent.py              # 子代理：SubAgent 类 & AgentSkillTemplete
 │   ├── todo.py                  # TODO 管理器：多步骤任务计划
 │   └── utils.py                 # 路径安全工具
@@ -357,8 +357,17 @@ s01 >> q   # 输入 q 或 exit 退出
 ### 工作原理
 
 1. 每个技能对应 `skills/<name>/SKILL.md`，文件头部使用 YAML frontmatter 声明元信息
-2. 启动时 `SkillRegistry` 自动扫描并注册所有技能，生成可用技能列表供系统提示使用
+2. 启动时 `SkillManager` 自动扫描并注册所有技能，生成可用技能列表供系统提示使用
 3. 代理调用 `load_skill` 工具时，技能的完整文档内容被注入当前上下文，代理即可按照文档指引执行专项任务
+
+### 模块导出约定（仅暴露公开接口）
+
+如果你希望 `modules/skill.py` 对外只暴露 `SkillManager`，建议使用以下约定：
+
+1. 内部实现类使用下划线前缀（如 `_SkillManifest`、`_SkillDocument`）
+2. 在模块中声明 `__all__ = ["SkillManager"]`
+
+这样在 `from modules.skill import *` 的场景下，只会导出 `SkillManager`，同时代码语义上也更清晰地区分了公开 API 与内部实现。
 
 ### 技能文档格式
 
