@@ -1,12 +1,8 @@
 ---
-name: 杀戮尖塔2全部卡牌
+name: Slay the Spire Cards Info
 title: 全部卡牌 | 杀戮尖塔2 攻略与Wiki
-scraped_at: 2026-04-09 15:57:03
+description: 杀戮尖塔2全部卡牌信息
 ---
-
-# 杀戮尖塔2卡牌库（Skill版）
-
-此文档已整理为结构化卡牌数据，适合 Claude Code 进行检索、筛选和构筑分析。
 
 ## 字段说明
 

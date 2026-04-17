@@ -2,12 +2,13 @@ from typing import Callable, cast
 
 from models.anthropic_client import anthropic_client as client
 from configs import SUBAGENT_MODEL, SKILL_DIR
+from modules.skill import skill_manager
+from modules.memory import memory_manager
 
 from .common import run_read, run_write, run_bash, run_edit
 from .todo import TODO
 from .subagent import SubAgent
-from .skill import SkillRegistry
-from modules.memory import memory_mgr
+
 
 
 SUB_AGENT_TOOLS = [
@@ -139,18 +140,17 @@ TOOLS = SUB_AGENT_TOOLS + [
     {
         "name": "save_memory", 
         "description": "Save a persistent memory that survives across sessions.",
-        "input_schema": 
-            {
-                "type": "object", 
-                "properties": {
-                    "name": {"type": "string", "description": "Short identifier (e.g. prefer_tabs, db_schema)"},
-                    "description": {"type": "string", "description": "One-line summary of what this memory captures"},
-                    "type": {"type": "string", "enum": ["user", "feedback", "project", "reference"], "description": "user=preferences, feedback=corrections, project=non-obvious project conventions or decision reasons, reference=external resource pointers"},
-                    "content": {"type": "string", "description": "Full memory content (multi-line OK)"},
-                }, 
-                "required": ["name", "description", "type", "content"]
-            },
+        "input_schema": {
+            "type": "object", 
+            "properties": {
+                "name": {"type": "string", "description": "Short identifier (e.g. prefer_tabs, db_schema)"},
+                "description": {"type": "string", "description": "One-line summary of what this memory captures"},
+                "type": {"type": "string", "enum": ["user", "feedback", "project", "reference"], "description": "user=preferences, feedback=corrections, project=non-obvious project conventions or decision reasons, reference=external resource pointers"},
+                "content": {"type": "string", "description": "Full memory content (multi-line OK)"},
+            }, 
+            "required": ["name", "description", "type", "content"]
         },
+    },
 ]
 
 
@@ -170,16 +170,15 @@ SUB_AGENT = SubAgent(
     tools=SUB_AGENT_TOOLS, 
     tools_handlers=SUB_AGENT_TOOL_HANDLERS,
 )
-SKILL_REGISTRY = SkillRegistry(SKILL_DIR)
 
 TOOL_HANDLERS = SUB_AGENT_TOOL_HANDLERS | cast(
     dict[str, Callable],
     {   
         "todo":       lambda **kw: TODO.update(kw["items"]),
         "task":       lambda **kw: SUB_AGENT.run_subagent(kw["prompt"]),
-        "load_skill": lambda **kw: SKILL_REGISTRY.load_full_text(kw["name"]),
+        "load_skill": lambda **kw: skill_manager.load_full_skill_body(kw["name"]),
         "compact":    lambda **kw: "Compaction triggered.",
-        "save_memory":  lambda **kw: memory_mgr.save_memory(kw["name"], kw["description"], kw["type"], kw["content"]),
+        "save_memory":  lambda **kw: memory_manager.save_memory(kw["name"], kw["description"], kw["type"], kw["content"]),
     }
 )
 

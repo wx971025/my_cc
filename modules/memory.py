@@ -1,3 +1,4 @@
+from multiprocessing import managers
 import re
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ from configs import(
 
 class MemoryManager:
     """
-    跨会话的持久记忆管理器。
+    跨会话的持久记忆管理器。单例模式
     
     存储结构：
     - 每条记忆对应一个独立的 .md 文件（带 YAML frontmatter）
@@ -24,9 +25,16 @@ class MemoryManager:
     下次启动时自动加载，不需要用户重复说明。
     """
 
+    def __new__(cls, memory_dir: Path = None):
+        if not hasattr(cls, "instance"):
+            cls.instance = super(MemoryManager, cls).__new__(cls)
+        return cls.instance
+
     def __init__(self, memory_dir: Path = None):
         self.memory_dir = memory_dir or MEMORY_DIR
         self.memories = {}  # name -> {description, type, content}
+
+        self._load_all()
 
     
     def _parse_frontmatter(self, text: str) -> dict | None:
@@ -43,7 +51,7 @@ class MemoryManager:
         return result
 
 
-    def load_all(self) -> None:
+    def _load_all(self) -> None:
         """启动时调用：扫描记忆目录，把所有 .md 记忆加载到内存中。"""
         self.memories = {}
         if not self.memory_dir.exists():
@@ -65,6 +73,8 @@ class MemoryManager:
         count = len(self.memories)
         if count > 0:
             print(f"[Memory] loaded: {count} memories from {self.memory_dir}")
+        else:
+            print(f"[Memory] no memories found in {self.memory_dir}")
 
 
     def load_memory_prompt(self) -> str:
@@ -102,6 +112,7 @@ class MemoryManager:
 
     def save_memory(self, name: str, description: str, mem_type: str, content: str) -> str:
         """
+        这个方法作为工具的handler。
         Agent 调用此方法保存一条新记忆。
         流程：校验类型 → 写 .md 文件 → 更新内存字典 → 重建索引。
         """
@@ -291,5 +302,4 @@ class DreamConsolidator:
         except (ValueError, OSError):
             pass
 
-
-memory_mgr = MemoryManager()
+memory_manager = MemoryManager()

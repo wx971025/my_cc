@@ -17,7 +17,8 @@ from .configs import (
     MEMORY_DIR,
     MEMORY_INDEX,
     MEMORY_TYPES,
-    MAX_INDEX_LINES
+    MAX_INDEX_LINES,
+    DYNAMIC_BOUNDARY
 )
 
 now = time.time()

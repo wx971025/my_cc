@@ -18,14 +18,12 @@ from models.anthropic_client import anthropic_client as client
 from configs import (
     WORKDIR, 
     MODEL, 
-    HARNESS_DIR, 
-    SKILL_DIR, 
     CONTEXT_LIMIT,
-    PERSIST_TOOL_RESULT
+    PERSIST_TOOL_RESULT,
+    DYNAMIC_BOUNDARY
 )
 from tools import TOOL_HANDLERS, TOOLS, TODO
 from tools.common import run_read
-from tools.skill import SkillRegistry
 from tools.compact import (
     micro_compact, 
     estimate_context_size, 
@@ -35,7 +33,9 @@ from tools.compact import (
 )
 from modules.permission import PermissionManager
 from modules.hook import HookManager
-from modules.memory import memory_mgr
+from modules.memory import memory_manager
+from modules.skill import skill_manager
+from modules.prompt import SystemPromptBuilder
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -49,51 +49,10 @@ try:
 except ImportError:
     pass
 
-SKILL_REGISTRY = SkillRegistry(SKILL_DIR)
 perms = PermissionManager()     # 工具执行权限管理
 hooks = HookManager()           # 钩子管理
 
-
-SYSTEM = f"""You are a coding agent at {str(WORKDIR)}.
-Use the todo tool for multi-step work.
-Keep exactly one step in_progress when a task has multiple steps.
-Refresh the plan as work advances. Prefer tools over prose.
-
-- Keep working step by step, and use compact if the conversation gets too long.
-
-- Use load_skill when a task needs specialized instructions before you act.
-
-Skills available:
-{SKILL_REGISTRY.describe_available()}
-"""
-if HARNESS_DIR:
-    SYSTEM += f"\n\nHere is the harness prompt for this project:{HARNESS_DIR.read_text()}"
-
-
-MEMORY_GUIDANCE = """
-When to save memories:
-- User states a preference ("I like tabs", "always use pytest") -> type: user
-- User corrects you ("don't do X", "that was wrong because...") -> type: feedback
-- You learn a project fact that is not easy to infer from current code alone
-  (for example: a rule exists because of compliance, or a legacy module must
-  stay untouched for business reasons) -> type: project
-- You learn where an external resource lives (ticket board, dashboard, docs URL)
-  -> type: reference
-When NOT to save:
-- Anything easily derivable from code (function signatures, file structure, directory layout)
-- Temporary task state (current branch, open PR numbers, current TODOs)
-- Secrets or credentials (API keys, passwords)
-"""
-
-
-def build_system_prompt() -> str:
-    """Assemble system prompt with memory content included."""
-    parts = [SYSTEM]
-    memory_section = memory_mgr.load_memory_prompt()
-    if memory_section:
-        parts.append(memory_section)
-    parts.append(MEMORY_GUIDANCE)
-    return "\n\n".join(parts)
+SYSTEM = SystemPromptBuilder(tools=TOOLS).build()   # 构建system_prompt
 
 
 def init_workspace_trust():
@@ -101,9 +60,12 @@ def init_workspace_trust():
     Initialize workspace trust.
     """
     print(f"[init_workspace_trust] Initializing workspace trust for >>> {WORKDIR}")
+    trust_marker = WORKDIR / ".claude" / ".claude_trusted"
+    if trust_marker.exists():
+        return True
+
     answer = input(f"Are you sure you want to initialize workspace trust? (y/n): ")
     if answer.lower() == "y":
-        trust_marker = WORKDIR / ".claude" / ".claude_trusted"
         trust_marker.parent.mkdir(parents=True, exist_ok=True)
         trust_marker.touch()
         return True
@@ -225,12 +187,8 @@ if __name__ == "__main__":
         print("[main] Workspace trust not initialized. Exiting...")
         exit(1)
 
-    memory_mgr.load_all()
-    mem_count = len(memory_mgr.memories)
-    if mem_count:
-        print(f"[{mem_count} memories loaded into context]")
-    else:
-        print("[No existing memories. The agent can create them with save_memory.]")
+    section_count = SYSTEM.count("\n# ")
+    print(f"[System prompt assembled: {len(SYSTEM)} chars, ~{section_count} sections]")
 
     history = []
     compact_state = CompactState()
@@ -238,7 +196,22 @@ if __name__ == "__main__":
     while True:
         try:
             query = input("\001\033[36m\002s01 >> \001\033[0;0m\002")
-            if query.strip().lower() in ("q", "exit", ""): break
+            if query.strip().lower() in ("q", "exit", ""): 
+                break
+
+            if query.strip().lower() == "/prompt":
+                print("--- System Prompt ---")
+                print(SYSTEM)
+                print("--- End ---")
+                continue
+
+                
+            if query.strip() == "/sections":
+                for line in SYSTEM.splitlines():
+                    if line.startswith("# ") or line == DYNAMIC_BOUNDARY:
+                        print(f"  {line}")
+                continue
+
         except (EOFError, KeyboardInterrupt):
             break
 

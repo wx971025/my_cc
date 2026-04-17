@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from configs import WORKDIR
+
 @dataclass
 class SkillManifest:
     name: str
@@ -15,17 +17,16 @@ class SkillDocument:
     body: str
 
 
-class SkillRegistry:
-    def __new__(cls, skills_dir: Path):
+class SkillManager:
+    def __new__(cls, skills_dir: Path | None = None):
         if not hasattr(cls, "instance"):
-            cls.instance = super(SkillRegistry, cls).__new__(cls)
+            cls.instance = super(SkillManager, cls).__new__(cls)
         return cls.instance
 
-    def __init__(self, skills_dir: Path):
-        self.skills_dir = skills_dir
+    def __init__(self, skills_dir: Path | None = None):
+        self.skills_dir = skills_dir or (WORKDIR / "skills")
         self.documents: dict[str, SkillDocument] = {}
 
-        # 加载全部skill
         self._load_all()
 
 
@@ -54,17 +55,27 @@ class SkillRegistry:
         return meta, match.group(2)
 
 
-    def describe_available(self) -> str:
+    def skill_describe_available(self) -> str:
         if not self.documents:
             return "(no skills available)"
         lines = []
         for name in sorted(self.documents):
             manifest = self.documents[name].manifest
             lines.append(f"- {manifest.name}: {manifest.description}")
-        return "\n".join(lines)
+        return "# Available skills:\n" + "\n".join(lines)
 
 
-    def load_full_text(self, name: str) -> str:
+    def load_full_skill_body(self, name: str) -> str:
+        """
+            这个作为工具调用结果输出, 实际上skill只是一个说明书
+            当Agent想要调用skill的时候, 实际上它得到的是个说明书
+
+        Args:
+            name (str): skill name
+
+        Returns:
+            str: skill body
+        """
         document = self.documents.get(name)
         if not document:
             known = ", ".join(sorted(self.documents)) or "(none)"
@@ -74,3 +85,5 @@ class SkillRegistry:
             f"{document.body}\n"
             "</skill>"
         )
+
+skill_manager = SkillManager()

@@ -31,7 +31,7 @@ if not HARNESS_DIR.exists():
 MODEL = "claude-sonnet-4-6"
 SUBAGENT_MODEL = "claude-sonnet-4-6"
 
-# -- Permission rules --
+# 权限规则
 DEFAULT_RULES = [
     # Always deny dangerous patterns
     {"tool": "bash", "command": "rm -rf /", "behavior": "deny"},
@@ -49,3 +49,7 @@ MEMORY_DIR = WORKDIR / ".memory"
 MEMORY_INDEX = MEMORY_DIR / "MEMORY.md"
 MEMORY_TYPES = ("user", "feedback", "project", "reference")
 MAX_INDEX_LINES = 200
+
+
+# 动态prompt分割边界
+DYNAMIC_BOUNDARY = "=== DYNAMIC_BOUNDARY ==="
