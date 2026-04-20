@@ -1,428 +1,332 @@
 # learn-claude-code
 
-一个基于 Anthropic Claude API 构建的**最小化 AI 编码代理（Coding Agent）**，旨在通过清晰的代码结构，帮助开发者理解和学习 Agent Loop、工具调用（Tool Use）、权限管控（Permission）、子代理（SubAgent）、上下文压缩（Context Compaction）等核心概念。
+一个面向学习的最小化 Coding Agent 项目：用清晰、可读的 Python 代码实现“对话 -> 工具调用 -> 权限决策 -> 结果回写 -> 继续推理”的完整循环。
+
+项目重点不是“功能最多”，而是把 Claude Code 一类 Agent 的核心机制拆解成容易理解的模块：
+- Agent Loop
+- Tool Use / Tool Result
+- 权限管道（Permission Pipeline）
+- Hook 机制
+- 上下文压缩（Micro + Full Compact）
+- Skill 按需加载
+- 持久化 Memory
+- 子代理（SubAgent）
+- 会话内 TODO 与跨会话 Task 图
 
 ---
 
-## 📖 项目简介
-
-本项目实现了一个可交互的命令行 AI 编码助手，核心思想是：
-
-```
-用户输入 → 调用 Claude 模型 → 检测 tool_use → 权限检查 → 执行工具 → 返回结果 → 循环
-```
-
-通过这个极简实现，你可以直观地看到：
-- Agent Loop 的完整运转机制
-- Claude 工具调用（Function Calling）的处理方式
-- **工具执行权限管控（Permission Pipeline）**
-- 子代理（SubAgent）的任务委派与上下文隔离
-- 多步骤任务的 TODO 计划管理
-- **上下文压缩（Context Compaction）的两级策略**
-- **技能系统（Skill System）的按需加载机制**
-
----
-
-## 🗂️ 项目结构
-
-```
-learn-claude-code/
-├── main.py                      # 主入口：Agent Loop 核心实现
-├── configs/
-│   ├── __init__.py
-│   └── configs.py               # 配置项：模型、压缩阈值、权限规则等
-├── models/
-│   ├── __init__.py
-│   └── anthropic_client.py      # Anthropic 客户端初始化
-├── modules/
-│   ├── __init__.py
-│   ├── permission.py            # 权限系统：PermissionManager
-│   ├── hook.py                  # Hook 系统：Pre/Post/SessionStart
-│   └── skill.py                 # 技能文档加载：SkillManager
-├── tools/
-│   ├── __init__.py              # 工具注册与路由（TOOLS / TOOL_HANDLERS）
-│   ├── common.py                # 基础工具实现：bash、读写编辑文件
-│   ├── compact.py               # 上下文压缩逻辑（微压缩 + 全量压缩）
-│   ├── subagent.py              # 子代理：SubAgent 类 & AgentSkillTemplete
-│   ├── todo.py                  # TODO 管理器：多步骤任务计划
-│   └── utils.py                 # 路径安全工具
-├── utils/
-│   └── messages.py              # 消息结构归一化与文本提取
-├── skills/
-│   ├── web_scraper/
-│   │   ├── SKILL.md             # 网页爬取技能文档
-│   │   └── scrape.py            # 爬取脚本实现
-│   └── cards/
-│       └── SKILL.md             # 示例技能文档
-├── .hooks.json                  # Hook 配置文件
-├── .hooks/                      # Hook 脚本目录（示例：pre_bash.sh/post_bash.sh）
-├── .task_outputs/
-│   └── tool-results/            # 持久化的大体积工具输出
-├── .transcripts/                # 压缩前的完整对话快照（.jsonl）
-├── pyproject.toml               # 项目依赖与配置
-└── .env                         # 环境变量（不提交至版本库，见下方配置说明）
-```
-
----
-
-## 🛠️ 可用工具（Tools）
-
-代理内置以下工具，Claude 可在对话中自动调用：
-
-| 工具名            | 功能描述                                       |
-|-----------------|----------------------------------------------|
-| `bash`          | 执行 Shell 命令（经过安全校验与权限管控）           |
-| `bash_readonly` | 执行只读 Shell 命令（不允许修改文件系统）           |
-| `read_file`     | 读取文件内容，支持行数限制                        |
-| `write_file`    | 写入文件内容（自动创建父目录）                     |
-| `edit_file`     | 精确替换文件中的指定文本（只替换一次）               |
-| `task`          | 派发子代理任务（全新上下文，共享文件系统）            |
-| `todo`          | 更新当前会话的多步骤任务计划                       |
-| `load_skill`    | 按需加载技能文档，将专项指令注入当前上下文            |
-| `compact`       | 主动触发上下文全量压缩，可指定需重点保留的 focus 信息 |
-
----
-
-## 🔒 权限管控（Permission Pipeline）
-
-每次工具调用前，`PermissionManager` 会按以下流程进行权限决策：
-
-```
-工具调用 → Bash 安全校验 → deny 规则匹配 → 模式检查 → allow 规则匹配 → 询问用户
-```
-
-### 运行模式
-
-| 模式        | 说明                                               |
-|-----------|--------------------------------------------------|
-| `default` | 默认模式，按规则匹配决定 allow/deny/ask              |
-| `plan`    | 计划模式，拒绝所有写操作，仅允许只读工具               |
-| `auto`    | 自动模式，自动放行只读工具，写操作需规则匹配或用户确认   |
-
-### Bash 安全校验（BashSecurityValidator）
-
-对 `bash` 工具执行额外的正则校验，拦截危险模式：
-
-| 校验项 | 风险等级 | 行为 |
-|-------|--------|------|
-| `sudo` | 高风险 | 直接拒绝 |
-| `rm -rf` | 高风险 | 直接拒绝 |
-| Shell 元字符（`; & \| \` $`） | 中风险 | 询问用户 |
-| 命令替换（`$()`） | 中风险 | 询问用户 |
-| IFS 注入 | 中风险 | 询问用户 |
-
-### 用户交互
-
-当权限决策为 `ask` 时，用户可选择：
-- `y` — 本次允许
-- `n` — 本次拒绝
-- `always` — 为该工具永久添加 allow 规则
-
-连续拒绝 3 次以上时，系统会提示考虑切换到 plan 模式。
-
-### 权限规则配置
-
-默认规则在 `configs/configs.py` 的 `DEFAULT_RULES` 中定义，支持按工具名、路径 glob、命令 glob 进行匹配：
-
-```python
-DEFAULT_RULES = [
-    {"tool": "bash", "command": "rm -rf /", "behavior": "deny"},
-    {"tool": "bash", "command": "sudo *",   "behavior": "deny"},
-    {"tool": "read_file", "path": "*",      "behavior": "allow"},
-]
-```
-
----
-
-## 🪝 Hook 系统（HookManager）
-
-项目内置了一个轻量 Hook 机制，入口在 `modules/hook.py`，当前支持以下事件：
-
-- `SessionStart`
-- `PreToolUse`
-- `PostToolUse`
-
-配置文件为项目根目录的 `.hooks.json`，示例结构：
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      { "matcher": "bash", "command": "bash .hooks/pre_bash.sh" }
-    ],
-    "PostToolUse": [
-      { "matcher": "bash", "command": "bash .hooks/post_bash.sh" }
-    ]
-  }
-}
-```
-
-### Hook 上下文与返回约定
-
-Hook 通过环境变量接收上下文：
-
-- `HOOK_EVENT`
-- `HOOK_TOOL_NAME`
-- `HOOK_TOOL_INPUT`（JSON 字符串）
-- `HOOK_TOOL_OUTPUT`（仅 PostToolUse 可用）
-
-退出码语义：
-
-- `0`：正常通过
-- `1`：阻止本次工具执行
-- `2`：向对话注入提示消息（不阻止）
-
-### Workspace Trust
-
-为避免在不可信仓库执行任意脚本，Hook 默认仅在工作区被信任后启用。当前教学版采用 marker file：
+## 项目结构
 
 ```text
-.claude/.claude_trusted
+learn-claude-code/
+├── main.py                      # 主循环入口
+├── configs/
+│   ├── __init__.py
+│   └── configs.py               # 模型、压缩阈值、权限规则等
+├── models/
+│   └── anthropic_client.py      # Anthropic 客户端封装（读取 DMX_* 环境变量）
+├── modules/
+│   ├── hook.py                  # HookManager
+│   ├── memory.py                # MemoryManager / DreamConsolidator(骨架)
+│   ├── permission.py            # PermissionManager + BashSecurityValidator
+│   ├── prompt.py                # SystemPromptBuilder
+│   ├── retry.py                 # 退避重试 backoff
+│   ├── skill.py                 # SkillManager
+│   └── task.py                  # TaskManager（落盘任务图）
+├── tools/
+│   ├── __init__.py              # 工具 schema 与 handler 注册
+│   ├── common.py                # bash/read/write/edit 实现
+│   ├── compact.py               # micro/full compact + transcript 持久化
+│   ├── subagent.py              # SubAgent
+│   ├── todo.py                  # TodoManager（会话内计划）
+│   └── utils.py                 # 路径安全工具
+├── utils/
+│   └── messages.py              # 消息标准化与文本提取
+├── skills/
+│   ├── cards/SKILL.md
+│   └── web_scraper/
+│       ├── SKILL.md
+│       └── scrape.py
+├── .hooks.json                  # Hook 配置
+├── .hooks/                      # 示例 hook 脚本
+├── .memory/                     # 持久化记忆目录
+├── .tasks/                      # 持久化任务目录
+├── .task_outputs/tool-results/  # 超大工具输出落盘目录
+├── .transcripts/                # full compact 前对话快照
+├── pyproject.toml
+└── README.md
 ```
-
-创建该文件即表示你信任当前工作区中的 Hook 配置。
 
 ---
 
-## ⚙️ 配置说明
+## 快速开始
 
-项目通过根目录下的 `.env` 文件读取密钥和配置，**请勿将 `.env` 文件提交到版本库**。
-
-项目提供了 `.env.example` 作为模板，按以下步骤配置：
-
-```bash
-cp .env.example .env
-```
-
-然后编辑 `.env`，填入真实的密钥值：
-
-| 变量名 | 是否必填 | 说明 |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | ✅ 必填 | Anthropic API 密钥，[前往获取](https://console.anthropic.com/settings/keys) |
-| `DEEPSEEK_API_KEY` | 可选 | DeepSeek API 密钥，[前往获取](https://platform.deepseek.com/api_keys) |
-| `DEEPSEEK_BASE_URL` | 可选 | DeepSeek API 地址，默认 `https://api.deepseek.com` |
-| `DMX_API_KEY` | 可选 | DMX API 密钥 |
-| `DMX_BASE_URL` | 可选 | DMX API 地址 |
-| `GITHUB_PAT` | 可选 | GitHub Personal Access Token，用于 HTTPS 推送代码，需要 `repo` 权限，[前往获取](https://github.com/settings/tokens) |
-
-### 核心配置参数
-
-以下参数在 `configs/configs.py` 中配置：
-
-| 参数 | 默认值 | 说明 |
-|------|-------|------|
-| `MODEL` | `claude-sonnet-4-6` | 主 Agent 使用的模型 |
-| `SUBAGENT_MODEL` | `claude-sonnet-4-6` | 子 Agent 使用的模型 |
-| `CONTEXT_LIMIT` | `50000` | 上下文字符数上限，超过则自动触发全量压缩 |
-| `KEEP_RECENT_TOOL_RESULTS` | `3` | 微压缩保留最近工具结果的条数 |
-| `PERSIST_TOOL_RESULT` | `True` | 是否开启大体积输出持久化 |
-| `PERSIST_THRESHOLD` | `30000` | 工具输出超过此字符数则落盘 |
-| `PREVIEW_CHARS` | `2000` | 落盘后保留在上下文中的预览字符数 |
-
----
-
-## 🚀 快速开始
-
-### 1. 环境要求
+### 1) 环境要求
 
 - Python >= 3.12
-- [uv](https://github.com/astral-sh/uv)（推荐包管理工具）
+- 推荐使用 [uv](https://github.com/astral-sh/uv)
 
-### 2. 安装依赖
+### 2) 安装依赖
 
 ```bash
 uv sync
 ```
 
-或使用 pip：
+### 3) 配置环境变量
 
 ```bash
-pip install -r requirements.txt
+cp .env.example .env
 ```
 
-### 3. 配置环境变量
+当前客户端 `models/anthropic_client.py` 读取的是：
+- `DMX_API_KEY`
+- `DMX_BASE_URL`
 
-参考上方「配置说明」，创建并填写 `.env` 文件。
+如果缺失会在启动时报错。
 
-### 4. （可选）启用 Hook 信任
-
-如果你希望 `.hooks.json` 生效，需要先标记工作区为 trusted：
+### 4) （可选）信任工作区以启用 Hook
 
 ```bash
 mkdir -p .claude
 touch .claude/.claude_trusted
 ```
 
-### 5. 启动代理
+### 5) 启动
 
 ```bash
 python main.py
 ```
 
-启动后进入交互式命令行：
+---
 
+## Agent Loop（main.py）
+
+主循环的关键路径：
+
+```text
+user query
+  -> micro_compact
+  -> context size check (auto full compact if needed)
+  -> client.messages.create(...)
+  -> assistant tool_use?
+      -> permission check
+      -> pre hook
+      -> run tool handler
+      -> post hook
+      -> append tool_result
+  -> optional manual compact
+  -> continue
 ```
-s01 >> 帮我列出当前目录下的所有 Python 文件
-s01 >> 写一个冒泡排序的函数并保存到 sort.py
-s01 >> q   # 输入 q 或 exit 退出
-```
+
+几个关键细节：
+- 每轮调用模型前都先做 `micro_compact`。
+- 若估算上下文超限，触发 `compact_history`（自动全量压缩）。
+- 若 API 返回 overlong_prompt，也会进入压缩恢复分支。
+- `compact` 工具可主动触发一次手动全量压缩。
 
 ---
 
-## 🔄 Agent Loop 工作原理
+## 可用工具（tools/__init__.py）
 
-```
-┌─────────────────────────────────────────┐
-│              用户输入消息                  │
-└─────────────────┬───────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────┐
-│       微压缩 + 上下文大小检查              │
-│    （超限则自动触发全量压缩）               │
-└─────────────────┬───────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────┐
-│         调用 Claude API                  │
-│    model.messages.create(...)            │
-└─────────────────┬───────────────────────┘
-                  │
-          stop_reason == "tool_use"?
-         /                          \
-        是                           否
-        │                             │
-        ▼                             ▼
-┌──────────────────┐          ┌──────────────┐
-│  权限检查          │          │  输出最终回复  │
-│  deny → 拒绝      │          │  结束循环     │
-│  ask  → 询问用户   │          └──────────────┘
-│  allow → 执行工具  │
-└──────┬───────────┘
-       │
-       ▼
-┌──────────────────────────┐
-│  将结果写回 messages      │
-│  → 手动 compact 检查      │
-└──────┬───────────────────┘
-       │
-       └──────────────────► 继续下一轮
+### 子代理与主代理都可用
+- `bash`
+- `bash_readonly`
+- `read_file`
+- `write_file`
+- `edit_file`
+- `todo`
+
+### 仅主代理可用
+- `task`（启动子代理）
+- `load_skill`
+- `compact`
+- `save_memory`
+- `task_create`
+- `task_update`
+- `task_list`
+- `task_get`
+
+---
+
+## 权限系统（modules/permission.py）
+
+决策流程：
+
+```text
+bash 安全校验 -> deny 规则 -> mode 检查 -> allow 规则 -> ask 用户
 ```
 
----
+### Bash 安全校验
+内置正则检测：
+- shell 元字符
+- `sudo`
+- `rm` 递归删除模式
+- 命令替换 `$()`
+- IFS 注入
 
-## 🗜️ 上下文压缩（Context Compaction）
+其中高风险（如 `sudo`、`rm` 递归）会直接 `deny`。
 
-随着对话轮次增加，消息历史会不断膨胀并超出模型上下文窗口限制。本项目实现了**两级压缩策略**：
-
-### Level 1 — 微压缩（Micro Compact）
-
-每轮循环开始时自动触发，**不丢失任何轮次**，仅对历史工具结果进行截断：
-
-- 保留最近 `KEEP_RECENT_TOOL_RESULTS`（默认 3）条工具结果的完整内容
-- 更早且超过 120 字符的工具结果替换为占位文本：`[Earlier tool result compacted. Re-run the tool if you need full detail.]`
-
-### Level 2 — 全量压缩（Full Compact）
-
-当上下文预估大小超过 `CONTEXT_LIMIT`（默认 50000）时自动触发，或由 `compact` 工具主动调用：
-
-1. 将完整对话历史以 `.jsonl` 格式保存到 `.transcripts/`（防止信息永久丢失）
-2. 调用 Claude 对历史对话生成摘要，保留：当前目标、重要发现与决策、已读写的文件、剩余工作、用户约束
-3. 用一条包含摘要的 `user` 消息替换全部历史，大幅缩减上下文体积
-4. 支持传入 `focus` 参数，在摘要末尾追加需重点保留的信息
-5. 自动附带最近访问的 5 个文件路径，便于压缩后快速恢复工作上下文
-
-### 大体积输出持久化
-
-工具输出超过 `PERSIST_THRESHOLD`（默认 30000）字符时，完整内容自动落盘至 `.task_outputs/tool-results/<tool_use_id>.txt`，消息中仅保留前 `PREVIEW_CHARS`（默认 2000）字符的预览片段，避免单次输出撑爆上下文。
+### 模式
+- `default`：按规则决策
+- `plan`：拒绝写操作，只允许只读工具
+- `auto`：只读工具自动放行，其他仍可能询问
 
 ---
 
-## 🤖 子代理（SubAgent）机制
+## Hook 机制（modules/hook.py）
 
-当主代理调用 `task` 工具时，会启动一个**独立子代理**：
+支持事件：
+- `SessionStart`
+- `PreToolUse`
+- `PostToolUse`
 
-- ✅ 子代理拥有**全新的对话上下文**，不继承主代理的历史
-- ✅ 子代理**共享文件系统**，可读写同一工作目录
-- ✅ 子代理完成任务后，仅将**最终摘要**返回给主代理
-- ✅ 最多运行 **30 轮**工具调用（安全上限）
-- ✅ 子代理可用工具：`bash`、`bash_readonly`、`read_file`、`write_file`、`edit_file`
+配置文件：`.hooks.json`
+
+Hook 通过环境变量获取上下文（如 `HOOK_TOOL_NAME`、`HOOK_TOOL_INPUT`）。
+返回码语义：
+- `0`：正常
+- `1`：阻断工具执行
+- `2`：向上下文注入提示消息
+
+默认仅在工作区可信（存在 `.claude/.claude_trusted`）时启用。
 
 ---
 
-## 🧩 技能系统（Skill System）
+## 上下文压缩（tools/compact.py）
 
-技能（Skill）是一种**按需加载的专项指令文档**，以 Markdown 文件的形式存放在 `skills/` 目录中。
+### 1) Micro Compact
+- 扫描历史 `tool_result`
+- 仅保留最近 `KEEP_RECENT_TOOL_RESULTS` 条完整输出
+- 更早且较长输出替换为占位文本
 
-### 工作原理
+### 2) Full Compact
+触发条件：
+- 循环开头估算超限
+- overlong_prompt 恢复分支
+- 工具 `compact` 主动触发
 
-1. 每个技能对应 `skills/<name>/SKILL.md`，文件头部使用 YAML frontmatter 声明元信息
-2. 启动时 `SkillManager` 自动扫描并注册所有技能，生成可用技能列表供系统提示使用
-3. 代理调用 `load_skill` 工具时，技能的完整文档内容被注入当前上下文，代理即可按照文档指引执行专项任务
+流程：
+1. 原始消息先写入 `.transcripts/transcript_*.jsonl`
+2. 调模型生成可继续工作的摘要
+3. 用一条带摘要的 user message 替换历史
+4. 记录 `CompactState.last_summary`
 
-### 模块导出约定（仅暴露公开接口）
+### 大输出落盘
+当工具输出超过 `PERSIST_THRESHOLD`：
+- 完整输出写入 `.task_outputs/tool-results/<tool_use_id>.txt`
+- 消息中只保留预览片段（`PREVIEW_CHARS`）
 
-如果你希望 `modules/skill.py` 对外只暴露 `SkillManager`，建议使用以下约定：
+---
 
-1. 内部实现类使用下划线前缀（如 `_SkillManifest`、`_SkillDocument`）
-2. 在模块中声明 `__all__ = ["SkillManager"]`
+## Skill 系统（modules/skill.py）
 
-这样在 `from modules.skill import *` 的场景下，只会导出 `SkillManager`，同时代码语义上也更清晰地区分了公开 API 与内部实现。
+- 启动时扫描 `skills/**/SKILL.md`
+- 读取 frontmatter 中的 `name` / `description`
+- `load_skill` 工具按名称返回完整 skill 文档
 
-### 技能文档格式
+技能文档格式示例：
 
 ```markdown
 ---
 name: my_skill
-description: 一句话描述这个技能的用途
+description: 一句话描述用途
 ---
 
-# My Skill
-
-具体的操作指引、步骤、注意事项...
+# Skill Title
+...
 ```
 
-### 内置技能
+---
 
-| 技能名          | 描述                              |
-|---------------|----------------------------------|
-| `web_scraper` | 爬取指定网页内容并将其转换保存为 Markdown 文件 |
-| `cards`       | 示例技能文档                        |
+## Memory 系统（modules/memory.py）
+
+- `save_memory` 工具把记忆存为 `.memory/*.md`（frontmatter + content）
+- 自动重建 `.memory/MEMORY.md` 索引
+- `SystemPromptBuilder` 会把记忆注入系统提示词
+
+记忆类型：
+- `user`
+- `feedback`
+- `project`
+- `reference`
+
+`DreamConsolidator` 当前是教学骨架，流程存在但未接入真实 LLM 整理逻辑。
 
 ---
 
-## 📋 TODO 管理器
+## 任务管理：Todo vs Task
 
-`TodoManager` 实现了一个单例的任务计划管理器：
+### Todo（会话内）
+`tools/todo.py`：轻量计划列表，约束：
+- 最多 12 项
+- 最多 1 项 `in_progress`
+- 多轮不更新会自动提醒
 
-- 最多 **12 个** 任务项
-- 每个任务有三种状态：`pending`、`in_progress`、`completed`
-- 同时只允许 **1 个** 任务处于 `in_progress` 状态
-- 超过 **3 轮**未更新计划，会自动提醒代理刷新
-
----
-
-## 📦 主要依赖
-
-| 依赖包             | 版本要求      | 用途                     |
-|-----------------|-------------|------------------------|
-| `anthropic`     | >= 0.88.0   | Claude API 客户端         |
-| `dotenv`        | >= 0.9.9    | 读取 .env 环境变量          |
-| `beautifulsoup4`| >= 4.14.3   | HTML 解析（技能：网页爬取）   |
-| `markdownify`   | >= 1.2.2    | HTML 转 Markdown         |
-| `colorama`      | >= 0.4.6    | 终端彩色输出               |
-| `openai`        | >= 2.30.0   | OpenAI 兼容接口（备用）      |
-| `langchain`     | >= 1.2.15   | 扩展链路与实验依赖            |
-| `langchain-core`| >= 1.2.27   | LangChain 核心组件           |
+### Task（跨会话落盘）
+`modules/task.py` + `task_*` 工具：
+- 任务持久化到 `.tasks/task_<id>.json`
+- 支持状态、owner、依赖关系（blockedBy / blocks）
 
 ---
 
-## 📄 License
+## 子代理（tools/subagent.py）
 
-MIT License
+`task` 工具会启动子代理：
+- 子代理使用独立对话上下文
+- 共享同一工作目录
+- 最多 30 轮工具循环
+- 最终只把摘要文本返回主代理
 
 ---
 
-## 🙋 贡献与反馈
+## Prompt 组装（modules/prompt.py）
 
-欢迎提交 Issue 和 Pull Request！如有问题，请在 [GitHub Issues](https://github.com/wx971025/my_cc/issues) 中反馈。
+`SystemPromptBuilder` 会按模块拼接：
+- core instruction
+- tool 列表
+- skill 列表
+- memory 内容
+- 可能存在的 `CLAUDE.md` 指令
+- dynamic context（日期、目录、模型、平台）
+
+并使用 `DYNAMIC_BOUNDARY` 作为静态/动态分隔。
+
+---
+
+## 常用命令
+
+启动后在交互中可使用：
+- `/help`
+- `/prompt`
+- `/sections`
+- `/skills`
+- `q` / `exit`
+
+---
+
+## 关键配置（configs/configs.py）
+
+- `MODEL` / `SUBAGENT_MODEL`
+- `CONTEXT_LIMIT`
+- `KEEP_RECENT_TOOL_RESULTS`
+- `PERSIST_TOOL_RESULT`
+- `PERSIST_THRESHOLD`
+- `PREVIEW_CHARS`
+- `DEFAULT_RULES`
+- `MAX_RECOVERY_ATTEMPTS`
+
+---
+
+## 依赖
+
+见 `pyproject.toml`，核心包括：
+- `anthropic`
+- `colorama`
+- `beautifulsoup4`
+- `markdownify`
+
+---
+
+## License
+
+MIT
