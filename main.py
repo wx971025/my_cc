@@ -27,7 +27,7 @@ from configs import (
     DYNAMIC_BOUNDARY,
     MAX_RECOVERY_ATTEMPTS
 )
-from tools import TOOL_HANDLERS, TOOLS, TODO
+from tools import TOOL_HANDLERS, TOOLS
 from tools.common import run_read
 from tools.compact import (
     micro_compact, 
@@ -42,6 +42,7 @@ from modules.memory import memory_manager
 from modules.skill import skill_manager
 from modules.prompt import SystemPromptBuilder
 from modules.retry import backoff_delay
+from modules.todo import todo_manager
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -208,10 +209,10 @@ def agent_loop(messages: list, state: CompactState):
                 )
         
         if used_todo:
-            TODO.state.rounds_since_update = 0
+            todo_manager.state.rounds_since_update = 0
         else:
-            TODO.note_round_without_update()
-            reminder = TODO.reminder()
+            todo_manager.note_round_without_update()
+            reminder = todo_manager.reminder()
             if reminder:
                 results.insert(0, {"type": "text", "text": reminder})
 

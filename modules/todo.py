@@ -84,4 +84,4 @@ class TodoManager:
         lines.append(f"\n({completed}/{len(self.state.items)} completed)")
         return "\n".join(lines)
 
-TODO = TodoManager()
+todo_manager = TodoManager()
