@@ -1,7 +1,8 @@
-import json
 import random
 
-from configs import BACKOFF_BASE_DELAY, BACKOFF_MAX_DELAY
+
+BACKOFF_BASE_DELAY = 1.0           # 基础延迟时间
+BACKOFF_MAX_DELAY = 30.0           # 最大延迟时间
 
 # 指数退避与随机抖动
 def backoff_delay(attempt: int) -> float:

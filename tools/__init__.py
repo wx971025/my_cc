@@ -4,6 +4,7 @@ from models.anthropic_client import anthropic_client as client
 from configs import SUBAGENT_MODEL, SKILL_DIR
 from modules.skill import skill_manager
 from modules.memory import memory_manager
+from modules.task import task_manager
 
 from .common import run_read, run_write, run_bash, run_edit
 from .todo import TODO
@@ -68,27 +69,6 @@ SUB_AGENT_TOOLS = [
             },
             "required": ["path", "old_text", "new_text"],
         },
-    }
-]
-
-TOOLS = SUB_AGENT_TOOLS + [
-    {
-        "name": "task", 
-        "description": ("Spawn a subagent with fresh context. "
-                        "It shares the filesystem but not conversation history."),
-        "input_schema": {
-            "type": "object", 
-            "properties": {
-                "prompt": {
-                    "type": "string"
-                }, 
-                "description": {
-                    "type": "string", 
-                    "description": "Short description of the task",
-                },
-            }, 
-            "required": ["prompt"],
-        },      
     },
     {
         "name": "todo",
@@ -118,12 +98,35 @@ TOOLS = SUB_AGENT_TOOLS + [
             "required": ["items"],
         },
     },
+]
+
+TOOLS = SUB_AGENT_TOOLS + [
+    {
+        "name": "task", 
+        "description": ("Spawn a subagent with fresh context. "
+                        "It shares the filesystem but not conversation history."),
+        "input_schema": {
+            "type": "object", 
+            "properties": {
+                "prompt": {
+                    "type": "string"
+                }, 
+                "description": {
+                    "type": "string", 
+                    "description": "Short description of the task",
+                },
+            }, 
+            "required": ["prompt"],
+        },      
+    },
     {
         "name": "load_skill",
         "description": "Load the full body of a named skill into the current context.",
         "input_schema": {
             "type": "object",
-            "properties": {"name": {"type": "string"}},
+            "properties": {
+                "name": {"type": "string"}
+            },
             "required": ["name"],
         },
     },
@@ -151,6 +154,52 @@ TOOLS = SUB_AGENT_TOOLS + [
             "required": ["name", "description", "type", "content"]
         },
     },
+    {
+        "name": "task_create", 
+        "description": "Create a new task.",
+        "input_schema": {   
+            "type": "object", 
+            "properties": 
+                {
+                    "subject": {"type": "string"}, 
+                    "description": {"type": "string"}
+                }, 
+                "required": ["subject"]
+        }
+    },
+    {
+        "name": "task_update", 
+        "description": "Update a task's status, owner, or dependencies.",
+        "input_schema": {
+            "type": "object", 
+            "properties": {
+                "task_id": {"type": "integer"}, 
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed", "deleted"]}, 
+                "owner": {"type": "string", "description": "Set when a teammate claims the task"}, 
+                "addBlockedBy": {"type": "array", "items": {"type": "integer"}}, 
+                "addBlocks": {"type": "array", "items": {"type": "integer"}}
+            }, 
+            "required": ["task_id"]
+        }
+    },
+    {
+        "name": "task_list", 
+        "description": "List all tasks with status summary.",
+        "input_schema": {
+            "type": "object", "properties": {}
+        }
+    },
+    {
+        "name": "task_get", 
+        "description": "Get full details of a task by ID.",
+        "input_schema": {
+            "type": "object", 
+            "properties": {
+                "task_id": {"type": "integer"}
+            }, 
+            "required": ["task_id"]
+        }
+    },
 ]
 
 
@@ -162,6 +211,7 @@ SUB_AGENT_TOOL_HANDLERS = cast(
         "read_file":  lambda **kw: run_read(state=kw["state"], path=kw["path"], limit=kw.get("limit")),
         "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
         "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
+        "todo":       lambda **kw: TODO.update(kw["items"]),
     }
 )
 
@@ -174,11 +224,14 @@ SUB_AGENT = SubAgent(
 TOOL_HANDLERS = SUB_AGENT_TOOL_HANDLERS | cast(
     dict[str, Callable],
     {   
-        "todo":       lambda **kw: TODO.update(kw["items"]),
         "task":       lambda **kw: SUB_AGENT.run_subagent(kw["prompt"]),
         "load_skill": lambda **kw: skill_manager.load_full_skill_body(kw["name"]),
         "compact":    lambda **kw: "Compaction triggered.",
         "save_memory":  lambda **kw: memory_manager.save_memory(kw["name"], kw["description"], kw["type"], kw["content"]),
+        "task_create": lambda **kw: task_manager.create(kw["subject"], kw.get("description", "")),
+        "task_update": lambda **kw: task_manager.update(kw["task_id"], kw.get("status"), kw.get("owner"), kw.get("addBlockedBy"), kw.get("addBlocks")),
+        "task_list":   lambda **kw: task_manager.list_all(),
+        "task_get":    lambda **kw: task_manager.get(kw["task_id"]),
     }
 )
 

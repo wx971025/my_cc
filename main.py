@@ -41,7 +41,7 @@ from modules.hook import HookManager
 from modules.memory import memory_manager
 from modules.skill import skill_manager
 from modules.prompt import SystemPromptBuilder
-from modules.retry import backoff_delay, estimate_tokens
+from modules.retry import backoff_delay
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -59,14 +59,6 @@ perms = PermissionManager()     # 工具执行权限管理
 hooks = HookManager()           # 钩子管理
 
 SYSTEM = SystemPromptBuilder(tools=TOOLS).build()   # 构建system_prompt
-
-
-
-CONTINUATION_MESSAGE = (
-    "Output limit hit. Continue directly from where you stopped -- "
-    "no recap, no repetition. Pick up mid-sentence if needed."
-)
-
 
 def init_workspace_trust():
     """
@@ -87,7 +79,6 @@ def init_workspace_trust():
 
 
 def agent_loop(messages: list, state: CompactState):
-    max_output_recovery_count = 0
     while True:
         messages[:] = micro_compact(messages)
 
