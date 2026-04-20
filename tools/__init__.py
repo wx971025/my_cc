@@ -7,6 +7,7 @@ from modules.memory import memory_manager
 from modules.task import task_manager
 from modules.todo import todo_manager
 from modules.backgroundTask import background_manager
+from modules.cron import cron_scheduler
 
 from .common import run_read, run_write, run_bash, run_edit
 from .subagent import SubAgent
@@ -223,6 +224,46 @@ TOOLS = SUB_AGENT_TOOLS + [
             "required": ["task_id"]
         }
     },
+    {
+        "name": "cron_create", 
+        "description": "Schedule a recurring or one-shot task with a cron expression.",
+        "input_schema": {
+            "type": "object", 
+            "properties": {
+                "cron": {"type": "string", "description": "5-field cron expression: 'min hour dom month dow'"},
+                "prompt": {"type": "string", "description": "The prompt to inject when the task fires"},
+                "recurring": {"type": "boolean", "description": "true=repeat, false=fire once then delete. Default true."},
+                "durable": {"type": "boolean", "description": "true=persist to disk, false=session-only. Default false."},
+            },
+            "required": ["cron", "prompt"]
+        }
+    },
+    {
+        "name": "cron_delete", 
+        "description": "Delete a scheduled task by ID.",
+        "input_schema": {
+            "type": "object", 
+            "properties": {
+                "id": {"type": "string", "description": "Task ID to delete"},
+            }, "required": ["id"]
+        }
+    },
+    {
+        "name": "cron_list", 
+        "description": "List all scheduled tasks.",
+        "input_schema": {
+            "type": "object", 
+            "properties": {},
+        }
+    },
+    {
+        "name": "cron_stop", 
+        "description": "Stop the cron scheduler.",
+        "input_schema": {
+            "type": "object", 
+            "properties": {},
+        }
+    }
 ]
 
 
@@ -257,6 +298,10 @@ TOOL_HANDLERS = SUB_AGENT_TOOL_HANDLERS | cast(
         "task_get":       lambda **kw: task_manager.get(kw["task_id"]),
         "background_run":   lambda **kw: background_manager.run(kw["command"]),
         "check_background": lambda **kw: background_manager.check(kw.get("task_id")),
+        "cron_create": lambda **kw: cron_scheduler.create(kw["cron"], kw["prompt"], kw.get("recurring", True), kw.get("durable", False)),
+        "cron_delete": lambda **kw: cron_scheduler.delete(kw["id"]),
+        "cron_list":   lambda **kw: cron_scheduler.list_tasks(),
+        "cron_stop":   lambda **kw: cron_scheduler.stop(),
     }
 )
 

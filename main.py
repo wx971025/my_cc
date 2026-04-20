@@ -11,9 +11,7 @@ It intentionally keeps the loop small, but still makes the loop state explicit
 so later chapters can grow from the same structure.
 """
 import sys
-import json
 import atexit
-import random
 import time
 atexit.register(lambda: sys.stdout.write("\033[0m"))
 from anthropic import APIError
@@ -43,6 +41,7 @@ from modules.skill import skill_manager
 from modules.prompt import SystemPromptBuilder
 from modules.retry import backoff_delay
 from modules.todo import todo_manager
+from modules.cron import cron_scheduler
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -86,6 +85,27 @@ def agent_loop(messages: list, state: CompactState):
         if estimate_context_size(messages) > CONTEXT_LIMIT:
             print("[auto compact...]")
             messages[:] = compact_history(messages, state)
+        
+        notifications = cron_scheduler.drain_notifications()
+        if notifications:
+            for note in notifications:
+                print(f"[Cron notification] {note[:100]}")
+
+            cron_payload = "<cron-notifications>\n" + "\n".join(notifications) + "\n</cron-notifications>"
+
+            if messages and messages[-1].get("role") == "user":
+                last_content = messages[-1].get("content")
+                if isinstance(last_content, str):
+                    if last_content.strip():
+                        messages[-1]["content"] = f"{last_content}\n\n{cron_payload}"
+                    else:
+                        messages[-1]["content"] = cron_payload
+                elif isinstance(last_content, list):
+                    last_content.append({"type": "text", "text": cron_payload})
+                else:
+                    messages[-1]["content"] = f"{str(last_content)}\n\n{cron_payload}"
+            else:
+                messages.append({"role": "user", "content": cron_payload})
         
         for attempt in range(MAX_RECOVERY_ATTEMPTS + 1):
             try:
@@ -229,6 +249,11 @@ if __name__ == "__main__":
     if not init_workspace_trust():
         print("[main] Workspace trust not initialized. Exiting...")
         exit(1)
+    
+    cron_scheduler.start()
+    print("[Cron scheduler running. Background checks every second.]")
+    print("[Commands: /cron to list tasks, /test to fire a test notification]")
+
 
     section_count = SYSTEM.count("\n# ")
     print(f"[System prompt assembled: {len(SYSTEM)} chars, ~{section_count} sections]")
@@ -270,6 +295,15 @@ if __name__ == "__main__":
                 print("--- Skills ---")
                 print(skill_manager.skill_describe_available())
                 print("--- End ---")
+                continue
+        
+            if query.strip() == "/cron":
+                print(cron_scheduler.list_tasks())
+                continue
+
+            if query.strip() == "/test":
+                cron_scheduler.queue.put("[Scheduled task test-0000]: This is a test notification.")
+                print("[Test notification enqueued. It will be injected on your next message.]")
                 continue
 
         except (EOFError, KeyboardInterrupt):

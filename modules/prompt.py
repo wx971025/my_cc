@@ -47,6 +47,8 @@ When NOT to save:
             f"You are a coding agent operating in {self.workdir}.\n"
             "Use the provided tools to explore, read, write, and edit files.\n"
             "Always verify before assuming. Prefer reading files over guessing."
+            "\n\nYou can schedule future work with cron_create. Tasks fire automatically "
+            "and their prompts are injected into the conversation."
             + self.MEMORY_GUIDANCE
         )
 
