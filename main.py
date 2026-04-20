@@ -11,8 +11,12 @@ It intentionally keeps the loop small, but still makes the loop state explicit
 so later chapters can grow from the same structure.
 """
 import sys
+import json
 import atexit
+import random
+import time
 atexit.register(lambda: sys.stdout.write("\033[0m"))
+from anthropic import APIError
 
 from models.anthropic_client import anthropic_client as client
 from configs import (
@@ -20,7 +24,8 @@ from configs import (
     MODEL, 
     CONTEXT_LIMIT,
     PERSIST_TOOL_RESULT,
-    DYNAMIC_BOUNDARY
+    DYNAMIC_BOUNDARY,
+    MAX_RECOVERY_ATTEMPTS
 )
 from tools import TOOL_HANDLERS, TOOLS, TODO
 from tools.common import run_read
@@ -36,6 +41,7 @@ from modules.hook import HookManager
 from modules.memory import memory_manager
 from modules.skill import skill_manager
 from modules.prompt import SystemPromptBuilder
+from modules.retry import backoff_delay, estimate_tokens
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -53,6 +59,13 @@ perms = PermissionManager()     # 工具执行权限管理
 hooks = HookManager()           # 钩子管理
 
 SYSTEM = SystemPromptBuilder(tools=TOOLS).build()   # 构建system_prompt
+
+
+
+CONTINUATION_MESSAGE = (
+    "Output limit hit. Continue directly from where you stopped -- "
+    "no recap, no repetition. Pick up mid-sentence if needed."
+)
 
 
 def init_workspace_trust():
@@ -74,21 +87,59 @@ def init_workspace_trust():
 
 
 def agent_loop(messages: list, state: CompactState):
+    max_output_recovery_count = 0
     while True:
         messages[:] = micro_compact(messages)
 
         if estimate_context_size(messages) > CONTEXT_LIMIT:
             print("[auto compact...]")
             messages[:] = compact_history(messages, state)
+        
+        for attempt in range(MAX_RECOVERY_ATTEMPTS + 1):
+            try:
+                print(f"[main] Thinking ...")
+                response = client.messages.create(
+                    model=MODEL, 
+                    system=SYSTEM,
+                    messages=normalize_messages(messages),
+                    tools=TOOLS, 
+                    max_tokens=8000,
+                )
+                break
+            except APIError as e:
+                error_body = str(e).lower()
 
-        print(f"[main] Thinking ...")
-        response = client.messages.create(
-            model=MODEL, 
-            system=SYSTEM,
-            messages=normalize_messages(messages),
-            tools=TOOLS, 
-            max_tokens=8000,
-        )
+                # prompt超长压缩
+                if "overlong_prompt" in error_body or ("prompt" in error_body and "long" in error_body):
+                    print(f"[Recovery] Prompt too long. Compacting... (attempt {attempt + 1})")
+                    messages[:] = compact_history(messages, state)
+                    continue
+                
+                # 重试
+                if attempt < MAX_RECOVERY_ATTEMPTS:
+                    delay: float = backoff_delay(attempt)
+                    print(f"[Recovery] API error: {e}. "
+                          f"Retrying in {delay:.1f}s (attempt {attempt + 1}/{MAX_RECOVERY_ATTEMPTS})")
+                    time.sleep(delay)
+                    continue
+
+                # 重试耗尽
+                print(f"[Error] API call failed after {MAX_RECOVERY_ATTEMPTS} retries: {e}")
+                return
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # 回滚重试
+                if attempt < MAX_RECOVERY_ATTEMPTS:
+                    delay = backoff_delay(attempt)
+                    print(f"[Recovery] Connection error: {e}. "
+                          f"Retrying in {delay:.1f}s (attempt {attempt + 1}/{MAX_RECOVERY_ATTEMPTS})")
+                    time.sleep(delay)
+                    continue
+                print(f"[Error] Connection failed after {MAX_RECOVERY_ATTEMPTS} retries: {e}")
+                return
+        if response is None:
+            print("[Error] No response received.")
+            return
+        
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":

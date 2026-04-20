@@ -53,3 +53,9 @@ MAX_INDEX_LINES = 200
 
 # 动态prompt分割边界
 DYNAMIC_BOUNDARY = "=== DYNAMIC_BOUNDARY ==="
+
+# 重试常量
+MAX_RECOVERY_ATTEMPTS = 3          # 模型调用错误, 最大重试次数
+BACKOFF_BASE_DELAY = 1.0           # 基础延迟时间
+BACKOFF_MAX_DELAY = 30.0           # 最大延迟时间
+TOKEN_THRESHOLD = 50000            # 上下文字符数阈值, 超过则触发压缩

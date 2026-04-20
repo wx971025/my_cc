@@ -26,8 +26,8 @@ class CompactState:
 
 
 def estimate_context_size(messages: list) -> int:
-    # 预估上下文大小
-    return len(str(messages))
+    """Rough token estimate: ~4 chars per token."""
+    return len(json.dumps(messages, default=str)) // 4
 
 
 def collect_tool_result_blocks(messages: List) -> list[tuple[int, int, dict]]:
@@ -119,11 +119,11 @@ def _summarize_history(messages: list) -> str:
 def compact_history(messages: list, state: CompactState, focus: str | None = None) -> list:
     transcript_path = _write_transcript(messages)
     print(f"[transcript saved: {transcript_path}]")
-    summary = _summarize_history(messages)
+    summary: str = _summarize_history(messages)
     if focus:
         summary += f"\n\nFocus to preserve next: {focus}"
     if state.recent_files:
-        recent_lines = "\n".join(f"- {path}" for path in state.recent_files)
+        recent_lines: str = "\n".join(f"- {path}" for path in state.recent_files)
         summary += f"\n\nRecent files to reopen if needed:\n{recent_lines}"
     state.has_compacted = True
     state.last_summary = summary
