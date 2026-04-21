@@ -262,21 +262,6 @@ merge_integrate(task_id=7, strategy="merge")
 
 ---
 
-## 11. 开发建议
-
-- 新增工具时优先保证“统一控制面”不被绕开
-- Worker 文件写入尽量经 `_exec_tool` 路由，不直接 `open()`
-- Merge 操作保持串行（避免主分支竞态）
-- 文档和代码一起更新，尤其是 `docs/worktree-isolation.md`
-
----
-
-## 12. 参考资料
-
-- s18 Worktree 隔离（项目内文档）：`docs/worktree-isolation.md`
-- s19 MCP 与插件（课程）：[https://learn.shareai.run/zh/s19/](https://learn.shareai.run/zh/s19/)
-
----
 
 ## License
 
