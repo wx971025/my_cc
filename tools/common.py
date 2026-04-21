@@ -1,11 +1,19 @@
 import subprocess
 import os
+from pathlib import Path
 
-from .utils import safe_path
+from .utils import safe_path_at
 from .compact import CompactState, track_recent_file
 
 
-def run_bash(command: str) -> str:
+def run_bash(command: str, cwd: str | Path | None = None) -> str:
+    """
+    shell 命令执行。
+
+    cwd:
+        - None     → 用 os.getcwd()（兼容老行为）
+        - Path/str → 用作子进程 cwd（worktree 车道目录）
+    """
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
     if any(item in command for item in dangerous):
         return "Error: Dangerous command blocked"
@@ -13,7 +21,7 @@ def run_bash(command: str) -> str:
         result = subprocess.run(
             command,
             shell=True,
-            cwd=os.getcwd(),
+            cwd=str(cwd) if cwd else os.getcwd(),
             capture_output=True,
             text=True,
             timeout=120,
@@ -28,14 +36,21 @@ def run_bash(command: str) -> str:
 
 
 def run_read(
-    *, state: CompactState | None = None, path: str = "", limit: int | None = None
+    *,
+    state: CompactState | None = None,
+    path: str = "",
+    limit: int | None = None,
+    base: Path | None = None,
 ) -> str:
+    """
+    base: 相对路径的解析基点；None 时仍然相对 WORKDIR（兼容老行为）。
+    """
     try:
         if path == "":
             return ""
         if state:
             track_recent_file(state, path)
-        lines = safe_path(path).read_text().splitlines()
+        lines = safe_path_at(path, base).read_text().splitlines()
         if limit and limit < len(lines):
             lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
         output = "\n".join(lines)
@@ -44,9 +59,9 @@ def run_read(
         return f"Error: {e}"
 
 
-def run_write(path: str, content: str) -> str:
+def run_write(path: str, content: str, base: Path | None = None) -> str:
     try:
-        fp = safe_path(path)
+        fp = safe_path_at(path, base)
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content)
         return f"Wrote {len(content)} bytes to {path}"
@@ -54,9 +69,9 @@ def run_write(path: str, content: str) -> str:
         return f"Error: {e}"
 
 
-def run_edit(path: str, old_text: str, new_text: str) -> str:
+def run_edit(path: str, old_text: str, new_text: str, base: Path | None = None) -> str:
     try:
-        fp = safe_path(path)
+        fp = safe_path_at(path, base)
         content = fp.read_text()
         if old_text not in content:
             return f"Error: Text not found in {path}"

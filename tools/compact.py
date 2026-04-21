@@ -27,7 +27,7 @@ class CompactState:
 
 def estimate_context_size(messages: list) -> int:
     """Rough token estimate: ~4 chars per token."""
-    return len(json.dumps(messages, default=str)) // 4
+    return len(json.dumps(messages, default=str, ensure_ascii=False)) // 4
 
 
 def collect_tool_result_blocks(messages: List) -> list[tuple[int, int, dict]]:
@@ -92,11 +92,11 @@ def _write_transcript(messages: List) -> Path:
     path = TRANSCRIPT_DIR / f"transcript_{int(time.time())}.jsonl"
     with path.open("w") as handle:
         for message in messages:
-            handle.write(json.dumps(message, default=str) + "\n")
+            handle.write(json.dumps(message, default=str, ensure_ascii=False) + "\n")
     return path
 
 def _summarize_history(messages: list) -> str:
-    conversation = json.dumps(messages, default=str)[:80000]
+    conversation = json.dumps(messages, default=str, ensure_ascii=False)[:80000]
     prompt = (
         "Summarize this coding-agent conversation so work can continue.\n"
         "Preserve:\n"

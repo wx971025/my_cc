@@ -13,6 +13,7 @@ so later chapters can grow from the same structure.
 import sys
 import atexit
 import time
+import json
 atexit.register(lambda: sys.stdout.write("\033[0m"))
 from anthropic import APIError
 
@@ -36,12 +37,13 @@ from tools.compact import (
 )
 from modules.permission import PermissionManager
 from modules.hook import HookManager
-from modules.memory import memory_manager
 from modules.skill import skill_manager
 from modules.prompt import SystemPromptBuilder
 from modules.retry import backoff_delay
 from modules.todo import todo_manager
 from modules.cron import cron_scheduler
+from modules.teammate import teammate_manager, message_bus
+from modules.mcp import mcp_registry
 from utils.messages import extract_text, normalize_messages
 
 try:
@@ -85,7 +87,48 @@ def agent_loop(messages: list, state: CompactState):
         if estimate_context_size(messages) > CONTEXT_LIMIT:
             print("[auto compact...]")
             messages[:] = compact_history(messages, state)
-        
+
+        # 多Agent, 找同事Agent通知给主Agent的产物
+        team_events = teammate_manager.poll_events("lead")
+        if team_events:
+            lines = ["<team-events>"]
+            for ev in team_events:
+                if ev.get("type") == "task_result_available":
+                    lines.append(
+                        f"- [result] request_id={ev['request_id']} "
+                        f"from={ev['from']} path={ev['result_path']}\n"
+                        f"  summary: {ev.get('summary', '')}"
+                    )
+                elif ev.get("type") == "task_result_stale":
+                    lines.append(
+                        f"- [stale] request_id={ev.get('request_id')} "
+                        f"from={ev.get('from')} note={ev.get('note')}"
+                    )
+                else:
+                    lines.append(
+                        f"- [{ev.get('type')}] from={ev.get('from')}: "
+                        f"{str(ev.get('content', ''))[:200]}"
+                    )
+            lines.append(
+                "Use read_file on result_path to fetch the full result when needed."
+            )
+            lines.append("</team-events>")
+            team_payload = "\n".join(lines)
+
+            if messages and messages[-1].get("role") == "user":
+                last_content = messages[-1].get("content")
+                if isinstance(last_content, str):
+                    messages[-1]["content"] = (
+                        f"{last_content}\n\n{team_payload}" if last_content.strip() else team_payload
+                    )
+                elif isinstance(last_content, list):
+                    last_content.append({"type": "text", "text": team_payload})
+                else:
+                    messages[-1]["content"] = f"{str(last_content)}\n\n{team_payload}"
+            else:
+                messages.append({"role": "user", "content": team_payload})
+
+        # 找定时任务的cron
         notifications = cron_scheduler.drain_notifications()
         if notifications:
             for note in notifications:
@@ -273,6 +316,7 @@ if __name__ == "__main__":
                 print("  /sections: Show the system prompt sections")
                 print("  /help: Show this help message")
                 print("  /skills: Show the available skills")
+                print("  /mcp: Show MCP server status")
                 print("  /q: Exit the agent")
                 print("--- End ---")
                 continue
@@ -281,6 +325,14 @@ if __name__ == "__main__":
                 print("--- System Prompt ---")
                 print(SYSTEM)
                 print("--- End ---")
+                continue
+            
+            if query.strip() == "/team":
+                print(teammate_manager.list_all())
+                continue
+
+            if query.strip() == "/inbox":
+                print(teammate_manager.list_pending())
                 continue
 
                 
@@ -299,6 +351,10 @@ if __name__ == "__main__":
         
             if query.strip() == "/cron":
                 print(cron_scheduler.list_tasks())
+                continue
+
+            if query.strip() == "/mcp":
+                print(mcp_registry.status())
                 continue
 
             if query.strip() == "/test":

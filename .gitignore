@@ -28,6 +28,9 @@ cpython-*/
 .vscode/
 .idea/
 *.swp
+
+# Worktree 执行车道（s18：每个 worker 的独立目录 + 元数据）
+.worktrees/
 *.swo
 
 --git-common-dir

@@ -29,10 +29,10 @@ class TaskManager:
 
     def _save(self, task: dict):
         path = self.dir / f"task_{task['id']}.json"
-        path.write_text(json.dumps(task, indent=2))
+        path.write_text(json.dumps(task, indent=2, ensure_ascii=False))
 
     
-    def create(self, subject: str, description: str = "") -> str:
+    def create(self, subject: str, description: str = "", claim_role: str = "") -> str:
         task = {
             "id": self._next_id, 
             "subject": subject, 
@@ -41,14 +41,20 @@ class TaskManager:
             "blockedBy": [], 
             "blocks": [], 
             "owner": "",
+            "claim_role": claim_role,
+            # s18 worktree 隔离字段
+            "worktree": "",              # 当前绑定的车道名
+            "worktree_state": "unbound", # active / kept / removed / unbound
+            "last_worktree": "",         # 最近一次用过的车道
+            "closeout": None,            # 最近一次收尾动作 (action/reason/at)
         }
         self._save(task)
         self._next_id += 1
-        return json.dumps(task, indent=2)
+        return json.dumps(task, indent=2, ensure_ascii=False)
 
 
     def get(self, task_id: int) -> str:
-        return json.dumps(self._load(task_id), indent=2)
+        return json.dumps(self._load(task_id), indent=2, ensure_ascii=False)
 
     
     def _clear_dependency(self, completed_id: int):
@@ -94,9 +100,42 @@ class TaskManager:
                     pass
         # 保存任务
         self._save(task)
-        return json.dumps(task, indent=2)
+        return json.dumps(task, indent=2, ensure_ascii=False)
 
     
+    # -------------------------------------------------------------------
+    # worktree 相关字段 setter（供 modules/worktree.py 回写）
+    # -------------------------------------------------------------------
+
+    def set_worktree(self, task_id: int, name: str, state: str) -> str:
+        """
+        绑定 / 解绑车道。state 取值: active / kept / removed / unbound
+        绑定成功若任务尚 pending 自动提升为 in_progress。
+        """
+        try:
+            task = self._load(task_id)
+        except ValueError as e:
+            return f"Error: {e}"
+        task["worktree"] = name
+        task["worktree_state"] = state
+        if name:
+            task["last_worktree"] = name
+        if state == "active" and task.get("status") == "pending":
+            task["status"] = "in_progress"
+        self._save(task)
+        return json.dumps(task, indent=2, ensure_ascii=False)
+
+    def set_closeout(self, task_id: int, closeout: dict) -> str:
+        """记录任务侧最近一次收尾动作（action / reason / at）。"""
+        try:
+            task = self._load(task_id)
+        except ValueError as e:
+            return f"Error: {e}"
+        task["closeout"] = closeout
+        self._save(task)
+        return json.dumps(task, indent=2, ensure_ascii=False)
+
+
     def list_all(self) -> str:
         """List all tasks in the order of their creation."""
         tasks = []

@@ -175,7 +175,7 @@ class CronScheduler:
         durable = [t for t in self.tasks if t.get("durable")]
         SCHEDULED_TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
         SCHEDULED_TASKS_FILE.write_text(
-            json.dumps(durable, indent=2) + "\n"
+            json.dumps(durable, indent=2, ensure_ascii=False) + "\n"
         )
 
     
