@@ -1,329 +1,280 @@
 # learn-claude-code
 
-一个面向学习的最小化 Coding Agent 项目：用清晰、可读的 Python 代码实现“对话 -> 工具调用 -> 权限决策 -> 结果回写 -> 继续推理”的完整循环。
+一个用于学习和演进的 Python Coding Agent 项目。  
+核心目标不是“功能最全”，而是把现代 Agent 的关键控制面拆成可读、可改、可验证的模块。
 
-项目重点不是“功能最多”，而是把 Claude Code 一类 Agent 的核心机制拆解成容易理解的模块：
-- Agent Loop
-- Tool Use / Tool Result
-- 权限管道（Permission Pipeline）
-- Hook 机制
-- 上下文压缩（Micro + Full Compact）
-- Skill 按需加载
-- 持久化 Memory
-- 子代理（SubAgent）
-- 会话内 TODO 与跨会话 Task 图
-
----
-
-## 项目结构
-
-```text
-learn-claude-code/
-├── main.py                      # 主循环入口
-├── configs/
-│   ├── __init__.py
-│   └── configs.py               # 模型、压缩阈值、权限规则等
-├── models/
-│   └── anthropic_client.py      # Anthropic 客户端封装（读取 DMX_* 环境变量）
-├── modules/
-│   ├── hook.py                  # HookManager
-│   ├── memory.py                # MemoryManager / DreamConsolidator(骨架)
-│   ├── permission.py            # PermissionManager + BashSecurityValidator
-│   ├── prompt.py                # SystemPromptBuilder
-│   ├── retry.py                 # 退避重试 backoff
-│   ├── skill.py                 # SkillManager
-│   └── task.py                  # TaskManager（落盘任务图）
-├── tools/
-│   ├── __init__.py              # 工具 schema 与 handler 注册
-│   ├── common.py                # bash/read/write/edit 实现
-│   ├── compact.py               # micro/full compact + transcript 持久化
-│   ├── subagent.py              # SubAgent
-│   ├── todo.py                  # TodoManager（会话内计划）
-│   └── utils.py                 # 路径安全工具
-├── utils/
-│   └── messages.py              # 消息标准化与文本提取
-├── skills/
-│   ├── cards/SKILL.md
-│   └── web_scraper/
-│       ├── SKILL.md
-│       └── scrape.py
-├── .hooks.json                  # Hook 配置
-├── .hooks/                      # 示例 hook 脚本
-├── .memory/                     # 持久化记忆目录
-├── .tasks/                      # 持久化任务目录
-├── .task_outputs/tool-results/  # 超大工具输出落盘目录
-├── .transcripts/                # full compact 前对话快照
-├── pyproject.toml
-└── README.md
-```
+当前版本已经覆盖：
+- 主循环（对话 -> tool_use -> tool_result 回流）
+- 权限闸门与 Hook
+- 上下文压缩与大输出落盘
+- Skill / Memory / Task / Cron
+- 多 Agent 团队协作（派单 + 任务板认领）
+- Worktree 隔离执行车道
+- Merge Queue（Lead 统一评审/集成）
+- MCP 外部工具接入（stdio，统一工具池）
 
 ---
 
-## 快速开始
+## 1. 快速开始
 
-### 1) 环境要求
+### 1.1 环境要求
+- Python 3.12+
+- 推荐 `uv`
 
-- Python >= 3.12
-- 推荐使用 [uv](https://github.com/astral-sh/uv)
-
-### 2) 安装依赖
-
+### 1.2 安装依赖
 ```bash
 uv sync
 ```
 
-### 3) 配置环境变量
-
+### 1.3 配置环境变量
 ```bash
 cp .env.example .env
 ```
 
-当前客户端 `models/anthropic_client.py` 读取的是：
+`models/anthropic_client.py` 读取：
 - `DMX_API_KEY`
 - `DMX_BASE_URL`
 
-如果缺失会在启动时报错。
-
-### 4) （可选）信任工作区以启用 Hook
-
+### 1.4 初始化工作区信任（可选，但建议）
 ```bash
 mkdir -p .claude
 touch .claude/.claude_trusted
 ```
 
-### 5) 启动
-
+### 1.5 启动
 ```bash
 python main.py
 ```
 
 ---
 
-## Agent Loop（main.py）
+## 2. 核心架构总览
 
-主循环的关键路径：
+### 2.1 主循环（`main.py`）
+每轮循环做的事：
+1. `micro_compact` 微压缩
+2. 注入队友事件（`teammate_manager.poll_events`）
+3. 注入 cron 通知
+4. 调模型（带工具定义）
+5. 若有 `tool_use`：权限检查 -> hooks -> handler 执行 -> 回写 `tool_result`
+6. 必要时 full compact（自动或手动）
+
+### 2.2 统一控制面
+无论工具来自哪里（本地 / MCP）都走同一条路径：
+- 同一个 `TOOLS` 工具池
+- 同一个 `TOOL_HANDLERS` 路由
+- 同一个权限系统（`PermissionManager`）
+- 同一个 Hook 管道（`PreToolUse` / `PostToolUse`）
+- 同一个 `tool_result` 回流
+
+这点是工程上最关键的稳定性来源。
+
+---
+
+## 3. 目录结构（重点）
 
 ```text
-user query
-  -> micro_compact
-  -> context size check (auto full compact if needed)
-  -> client.messages.create(...)
-  -> assistant tool_use?
-      -> permission check
-      -> pre hook
-      -> run tool handler
-      -> post hook
-      -> append tool_result
-  -> optional manual compact
-  -> continue
+learn-claude-code/
+├── main.py
+├── configs/
+├── models/
+├── modules/
+│   ├── permission.py
+│   ├── hook.py
+│   ├── prompt.py
+│   ├── retry.py
+│   ├── skill.py
+│   ├── memory.py
+│   ├── task.py
+│   ├── taskBoard.py
+│   ├── teammate.py
+│   ├── worktree.py
+│   ├── mergeQueue.py
+│   └── mcp/
+│       ├── __init__.py
+│       ├── client.py
+│       └── registry.py
+├── tools/
+│   ├── __init__.py
+│   ├── common.py
+│   ├── compact.py
+│   └── subagent.py
+├── mcp_servers/
+│   └── echo_server.py
+├── .mcp.json
+├── .hooks.json
+├── .memory/
+├── .tasks/
+├── .team/
+├── .worktrees/
+└── README.md
 ```
 
-几个关键细节：
-- 每轮调用模型前都先做 `micro_compact`。
-- 若估算上下文超限，触发 `compact_history`（自动全量压缩）。
-- 若 API 返回 overlong_prompt，也会进入压缩恢复分支。
-- `compact` 工具可主动触发一次手动全量压缩。
+---
+
+## 4. 工具体系
+
+工具注册在 `tools/__init__.py`，分三层：
+
+- **子代理与主代理共享工具**：`bash`、`read_file`、`write_file`、`edit_file`、`todo` 等
+- **主代理专用工具**：任务管理、团队管理、任务板、worktree、merge queue 等
+- **MCP 动态工具**：启动时读取 `.mcp.json`，自动注入命名为  
+  `mcp__<server_alias>__<tool_name>`
 
 ---
 
-## 可用工具（tools/__init__.py）
+## 5. 多 Agent 协作（推荐流程）
 
-### 子代理与主代理都可用
-- `bash`
-- `bash_readonly`
-- `read_file`
-- `write_file`
-- `edit_file`
-- `todo`
+### 5.1 角色
+- **Lead Agent**：派单、收集结果、评审并集成改动
+- **Worker Agent**：执行任务，必要时使用 worktree 车道隔离改动
 
-### 仅主代理可用
-- `task`（启动子代理）
-- `load_skill`
-- `compact`
-- `save_memory`
-- `task_create`
-- `task_update`
-- `task_list`
-- `task_get`
+### 5.2 两种派单方式
+- 直投：`assign_task`（指定某个 teammate）
+- 任务板：`board_post_task`（任意符合角色的 worker 自主认领）
+
+### 5.3 结果回传
+worker 完成后写 `.team/results/*.md`，lead 在下一轮 `poll_events` 收到事件，再按需 `read_file` 查看完整正文。
 
 ---
 
-## 权限系统（modules/permission.py）
+## 6. Worktree 隔离 + Merge Queue
 
-决策流程：
+### 6.1 Worktree（`modules/worktree.py`）
+每条板任务可绑定独立车道（`wt/<name>` + `.worktrees/<name>`），降低并行污染风险。
 
-```text
-bash 安全校验 -> deny 规则 -> mode 检查 -> allow 规则 -> ask 用户
+关键动作：
+- `create` / `bind` / `enter` / `closeout`
+- dirty 检查：`remove` 前若有未提交改动会降级为 `keep`
+- 生命周期记录在 `.worktrees/index.json` 和 `.worktrees/events.jsonl`
+
+### 6.2 Merge Queue（`modules/mergeQueue.py`）
+worker 在车道里提交后，向 merge queue 登记“待评审 patch”；lead 决策：
+- `merge`：合并进主分支（串行锁保护），成功后可完结任务
+- `reject`：标记拒绝，分支保留供复盘
+
+可用工具：
+- `merge_queue_list`
+- `merge_review`
+- `merge_integrate`
+
+---
+
+## 7. MCP 外部能力接入
+
+### 7.1 配置文件（`.mcp.json`）
+最小示例：
+
+```json
+{
+  "mcpServers": {
+    "demo": {
+      "command": "python",
+      "args": ["-u", "mcp_servers/echo_server.py"]
+    }
+  }
+}
 ```
 
-### Bash 安全校验
-内置正则检测：
-- shell 元字符
-- `sudo`
-- `rm` 递归删除模式
-- 命令替换 `$()`
-- IFS 注入
+### 7.2 启动流程
+`tools/__init__.py` 在 import 末尾调用 `mcp_registry.bootstrap()`：
+1. 读取 `.mcp.json`
+2. `subprocess.Popen` 拉起每个 MCP server
+3. `initialize` + `tools/list`
+4. 把远端工具注入主工具池
 
-其中高风险（如 `sudo`、`rm` 递归）会直接 `deny`。
+### 7.3 调试命令
+- 交互内输入 `/mcp` 查看 server 状态
+- 工具 `mcp_status` 也可输出同样信息
 
-### 模式
-- `default`：按规则决策
-- `plan`：拒绝写操作，只允许只读工具
-- `auto`：只读工具自动放行，其他仍可能询问
+### 7.4 教学边界
+当前实现聚焦 `tools-first`：
+- 仅 stdio transport
+- 覆盖 `initialize` / `tools/list` / `tools/call`
+- 未展开 resources/prompts/auth/elicitation（可后续扩展）
 
 ---
 
-## Hook 机制（modules/hook.py）
+## 8. 权限、Hook、压缩
 
-支持事件：
+### 8.1 权限系统（`modules/permission.py`）
+决策顺序：
+`bash 安全校验 -> deny 规则 -> mode 检查 -> allow 规则 -> ask_user`
+
+模式：
+- `default`
+- `plan`（禁写）
+- `auto`（只读自动放行）
+
+### 8.2 Hook（`modules/hook.py`）
+支持：
 - `SessionStart`
 - `PreToolUse`
 - `PostToolUse`
 
-配置文件：`.hooks.json`
+配置在 `.hooks.json`。  
+返回码可用于阻断工具执行或注入提示。
 
-Hook 通过环境变量获取上下文（如 `HOOK_TOOL_NAME`、`HOOK_TOOL_INPUT`）。
-返回码语义：
-- `0`：正常
-- `1`：阻断工具执行
-- `2`：向上下文注入提示消息
-
-默认仅在工作区可信（存在 `.claude/.claude_trusted`）时启用。
+### 8.3 压缩（`tools/compact.py`）
+- Micro compact：压缩旧 `tool_result` 文本体积
+- Full compact：上下文超限或手动触发 `compact`
+- 大输出可落盘到 `.task_outputs/tool-results/`
 
 ---
 
-## 上下文压缩（tools/compact.py）
+## 9. 常用交互命令
 
-### 1) Micro Compact
-- 扫描历史 `tool_result`
-- 仅保留最近 `KEEP_RECENT_TOOL_RESULTS` 条完整输出
-- 更早且较长输出替换为占位文本
-
-### 2) Full Compact
-触发条件：
-- 循环开头估算超限
-- overlong_prompt 恢复分支
-- 工具 `compact` 主动触发
-
-流程：
-1. 原始消息先写入 `.transcripts/transcript_*.jsonl`
-2. 调模型生成可继续工作的摘要
-3. 用一条带摘要的 user message 替换历史
-4. 记录 `CompactState.last_summary`
-
-### 大输出落盘
-当工具输出超过 `PERSIST_THRESHOLD`：
-- 完整输出写入 `.task_outputs/tool-results/<tool_use_id>.txt`
-- 消息中只保留预览片段（`PREVIEW_CHARS`）
-
----
-
-## Skill 系统（modules/skill.py）
-
-- 启动时扫描 `skills/**/SKILL.md`
-- 读取 frontmatter 中的 `name` / `description`
-- `load_skill` 工具按名称返回完整 skill 文档
-
-技能文档格式示例：
-
-```markdown
----
-name: my_skill
-description: 一句话描述用途
----
-
-# Skill Title
-...
-```
-
----
-
-## Memory 系统（modules/memory.py）
-
-- `save_memory` 工具把记忆存为 `.memory/*.md`（frontmatter + content）
-- 自动重建 `.memory/MEMORY.md` 索引
-- `SystemPromptBuilder` 会把记忆注入系统提示词
-
-记忆类型：
-- `user`
-- `feedback`
-- `project`
-- `reference`
-
-`DreamConsolidator` 当前是教学骨架，流程存在但未接入真实 LLM 整理逻辑。
-
----
-
-## 任务管理：Todo vs Task
-
-### Todo（会话内）
-`tools/todo.py`：轻量计划列表，约束：
-- 最多 12 项
-- 最多 1 项 `in_progress`
-- 多轮不更新会自动提醒
-
-### Task（跨会话落盘）
-`modules/task.py` + `task_*` 工具：
-- 任务持久化到 `.tasks/task_<id>.json`
-- 支持状态、owner、依赖关系（blockedBy / blocks）
-
----
-
-## 子代理（tools/subagent.py）
-
-`task` 工具会启动子代理：
-- 子代理使用独立对话上下文
-- 共享同一工作目录
-- 最多 30 轮工具循环
-- 最终只把摘要文本返回主代理
-
----
-
-## Prompt 组装（modules/prompt.py）
-
-`SystemPromptBuilder` 会按模块拼接：
-- core instruction
-- tool 列表
-- skill 列表
-- memory 内容
-- 可能存在的 `CLAUDE.md` 指令
-- dynamic context（日期、目录、模型、平台）
-
-并使用 `DYNAMIC_BOUNDARY` 作为静态/动态分隔。
-
----
-
-## 常用命令
-
-启动后在交互中可使用：
+在 `python main.py` 交互中可用：
 - `/help`
 - `/prompt`
 - `/sections`
 - `/skills`
+- `/team`
+- `/inbox`
+- `/cron`
+- `/test`
+- `/mcp`
 - `q` / `exit`
 
 ---
 
-## 关键配置（configs/configs.py）
+## 10. 典型实操片段
 
-- `MODEL` / `SUBAGENT_MODEL`
-- `CONTEXT_LIMIT`
-- `KEEP_RECENT_TOOL_RESULTS`
-- `PERSIST_TOOL_RESULT`
-- `PERSIST_THRESHOLD`
-- `PREVIEW_CHARS`
-- `DEFAULT_RULES`
-- `MAX_RECOVERY_ATTEMPTS`
+### 10.1 启动团队并挂板
+```text
+spawn_teammate(name="alice", role="backend")
+spawn_teammate(name="bob", role="frontend")
+board_post_task(subject="refactor cron retry", claim_role="backend")
+board_post_task(subject="landing hero section", claim_role="frontend")
+```
+
+### 10.2 Lead 处理 merge queue
+```text
+merge_queue_list
+merge_review(task_id=7)
+merge_integrate(task_id=7, strategy="merge")
+```
+
+### 10.3 查看 MCP 状态
+```text
+/mcp
+```
 
 ---
 
-## 依赖
+## 11. 开发建议
 
-见 `pyproject.toml`，核心包括：
-- `anthropic`
-- `colorama`
-- `beautifulsoup4`
-- `markdownify`
+- 新增工具时优先保证“统一控制面”不被绕开
+- Worker 文件写入尽量经 `_exec_tool` 路由，不直接 `open()`
+- Merge 操作保持串行（避免主分支竞态）
+- 文档和代码一起更新，尤其是 `docs/worktree-isolation.md`
+
+---
+
+## 12. 参考资料
+
+- s18 Worktree 隔离（项目内文档）：`docs/worktree-isolation.md`
+- s19 MCP 与插件（课程）：[https://learn.shareai.run/zh/s19/](https://learn.shareai.run/zh/s19/)
 
 ---
 
